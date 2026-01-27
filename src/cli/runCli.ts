@@ -27,7 +27,7 @@ type CliOptions = {
   workflow?: string;
   jobs?: string[];
   all?: boolean;
-  mentionJson?: boolean;
+  json?: boolean;
   event?: string;
   eventPath?: string;
   matrix?: string[];
@@ -120,10 +120,12 @@ export async function runCli(): Promise<void> {
     return;
   }
 
-  const availableJobs = filterJobsForEvent(workflow.jobs, eventName);
-  const presets = resolvePresets(config.presets, availableJobs, config.defaultPreset);
+  const presets = resolvePresets(config.presets, workflow.jobs, config.defaultPreset);
   const presetId = args.preset ?? config.defaultPreset ?? "quick";
   const preset = presets.find((item) => item.id === presetId) ?? presets[0];
+
+  const effectiveEvent = args.event ?? preset?.event?.name ?? eventName;
+  const availableJobs = filterJobsForEvent(workflow.jobs, effectiveEvent);
 
   let selectedJobs = resolveJobsFromArgs(args, preset);
   if (args.all) {
@@ -159,7 +161,6 @@ export async function runCli(): Promise<void> {
 
   const expanded = expandJobIdsWithNeeds(workflow, selectedJobs);
   const ordered = sortJobsByNeeds(workflow, expanded);
-  const effectiveEvent = args.event ?? preset?.event?.name ?? eventName;
   const effectivePayloadPath = args.eventPath ?? preset?.event?.payloadPath;
 
   const plan = buildRunPlan({
@@ -196,7 +197,7 @@ export async function runCli(): Promise<void> {
     matrixOverride: plan.jobs[0]?.matrix ?? undefined
   };
 
-  const preflightOk = await runPreflightChecks(config.runtime.container, isTty && !args.mentionJson);
+  const preflightOk = await runPreflightChecks(config.runtime.container, isTty && !args.json);
   if (!preflightOk) {
     process.exitCode = 1;
     return;
@@ -206,22 +207,22 @@ export async function runCli(): Promise<void> {
   const planned = await adapter.plan(engineContext, plan);
 
   let result;
-  if (isTty && !args.mentionJson) {
+  if (isTty && !args.json) {
     result = await runWithInk(adapter, planned, engineContext, workflow, path.join(repoRoot, ".xci", "runs"));
     outro(`Logs: ${result.logsPath}`);
   } else {
-    if (!args.mentionJson) {
+    if (!args.json) {
       process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
     }
     result = await adapter.run(planned, engineContext);
-    if (!args.mentionJson) {
+    if (!args.json) {
       process.stdout.write(`Finished with exit code ${result.exitCode}\\n`);
     }
-    if (!args.mentionJson) {
+    if (!args.json) {
       process.stdout.write(`Logs: ${result.logsPath}\\n`);
     }
   }
-  if (args.mentionJson) {
+  if (args.json) {
     const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
     process.stdout.write(`${JSON.stringify(summary)}\\n`);
   }
@@ -269,7 +270,7 @@ function parseArgs(argv: string[]): CliOptions {
         options.preset = args.shift();
         break;
       case "--json":
-        options.mentionJson = true;
+        options.json = true;
         break;
       default:
         if (arg) {
@@ -304,7 +305,7 @@ function resolveJobsFromArgs(options: CliOptions, preset?: RunPreset): string[] 
 
 function resolvePresets(
   presets: Record<string, { jobs: string[]; event?: { name: string; payloadPath?: string }; matrix?: string[] }>,
-  availableJobs: { id: string }[],
+  allJobs: { id: string }[],
   defaultPreset?: string
 ): RunPreset[] {
   const resolved: RunPreset[] = Object.entries(presets).map(([id, preset]) => ({
@@ -319,7 +320,7 @@ function resolvePresets(
     resolved.push({
       id: "quick",
       label: "quick",
-      jobIds: availableJobs.slice(0, 2).map((job) => job.id)
+      jobIds: allJobs.slice(0, 2).map((job) => job.id)
     });
   }
 
@@ -327,7 +328,7 @@ function resolvePresets(
     resolved.push({
       id: "full",
       label: "full",
-      jobIds: availableJobs.map((job) => job.id)
+      jobIds: allJobs.map((job) => job.id)
     });
   }
 
@@ -335,7 +336,7 @@ function resolvePresets(
     resolved.unshift({
       id: defaultPreset,
       label: defaultPreset,
-      jobIds: availableJobs.map((job) => job.id)
+      jobIds: allJobs.map((job) => job.id)
     });
   }
 

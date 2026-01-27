@@ -2,3 +2,11 @@ node_modules
 dist
 .DS_Store
 .npm-cache
+.agents
+.codex
+.docs
+.tmp
+.xci
+tui-logs.txt
+
+TODO.md

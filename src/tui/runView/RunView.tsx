@@ -45,7 +45,7 @@ export function RunView({
 }: RunViewProps): JSX.Element {
 	const { exit } = useApp();
 	const [runRecord, setRunRecord] = useState<RunRecord | null>(null);
-	const [statusText, setStatusText] = useState("starting");
+  const [statusText, setStatusText] = useState<RunStatus>("pending");
 	const [readError, setReadError] = useState<string | null>(null);
 	const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_VIEW);
 	const [selectedJobIndex, setSelectedJobIndex] = useState(0);
@@ -225,10 +225,9 @@ export function RunView({
 				<Text>
 					{workflow.name} · {plan.event.name} · {plan.runId}
 				</Text>
-				<Text dimColor>
-					{renderStatusGlyph(statusText as RunStatus, spinnerIndex)}{" "}
-					{STATUS_LABELS[statusText as RunStatus]}
-				</Text>
+        <Text dimColor>
+          {renderStatusGlyph(statusText, spinnerIndex)} {STATUS_LABELS[statusText]}
+        </Text>
 			</Box>
 
 			{viewMode === "summary" ? (

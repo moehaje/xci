@@ -112,7 +112,8 @@ function isPullRequestOnly(job: Job): boolean {
   if (!job.if) {
     return false;
   }
-  return job.if.includes("pull_request");
+  const expr = job.if.toLowerCase();
+  return expr.includes("pull_request") || expr.includes("pull_request_target");
 }
 
 function createRunId(): string {

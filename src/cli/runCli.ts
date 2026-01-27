@@ -1,10 +1,8 @@
 import path from "node:path";
 import process from "node:process";
-import fs from "node:fs";
 import React from "react";
 import {
   cancel,
-  confirm,
   intro,
   isCancel,
   multiselect,
@@ -13,29 +11,18 @@ import {
   text
 } from "@clack/prompts";
 import { render } from "ink";
+import type { RunPlan, RunPreset, Workflow } from "../core/types.js";
+import type { EngineAdapter, EngineContext, EngineRunResult } from "../core/engine.js";
 import { discoverWorkflows } from "../core/discovery.js";
 import { buildRunPlan, expandJobIdsWithNeeds, filterJobsForEvent, sortJobsByNeeds } from "../core/plan.js";
-import { RunPlan, RunPreset, Workflow } from "../core/types.js";
 import { ActAdapter } from "../engines/act/actAdapter.js";
-import { EngineAdapter, EngineContext, EngineRunResult } from "../core/engine.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { RunStore } from "../store/runStore.js";
 import { RunView } from "../tui/runView.js";
-
-type CliOptions = {
-  command: "run";
-  workflow?: string;
-  jobs?: string[];
-  all?: boolean;
-  json?: boolean;
-  event?: string;
-  eventPath?: string;
-  matrix?: string[];
-  preset?: string;
-  help?: boolean;
-  version?: boolean;
-  unknown?: string[];
-};
+import { parseArgs, printHelp, readPackageVersion } from "./args.js";
+import type { CliOptions } from "./args.js";
+import { prepareInputFiles } from "./inputs.js";
+import { runPreflightChecks } from "./preflight.js";
 
 export async function runCli(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
@@ -229,60 +216,6 @@ export async function runCli(): Promise<void> {
   process.exitCode = result.exitCode;
 }
 
-function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { command: "run", unknown: [] };
-  const args = [...argv];
-  if (args[0] && !args[0].startsWith("-")) {
-    options.command = "run";
-    args.shift();
-  }
-
-  while (args.length) {
-    const arg = args.shift();
-    switch (arg) {
-      case "--help":
-      case "-h":
-        options.help = true;
-        break;
-      case "--version":
-      case "-v":
-        options.version = true;
-        break;
-      case "--workflow":
-        options.workflow = args.shift();
-        break;
-      case "--job":
-        options.jobs = (args.shift() ?? "").split(",").filter(Boolean);
-        break;
-      case "--all":
-        options.all = true;
-        break;
-      case "--event":
-        options.event = args.shift();
-        break;
-      case "--event-path":
-        options.eventPath = args.shift();
-        break;
-      case "--matrix":
-        options.matrix = collectMatrices(options.matrix, args.shift());
-        break;
-      case "--preset":
-        options.preset = args.shift();
-        break;
-      case "--json":
-        options.json = true;
-        break;
-      default:
-        if (arg) {
-          options.unknown?.push(arg);
-        }
-        break;
-    }
-  }
-
-  return options;
-}
-
 function resolveWorkflow(workflows: Workflow[], selector?: string): Workflow | undefined {
   if (!selector) {
     return workflows.length === 1 ? workflows[0] : undefined;
@@ -403,13 +336,6 @@ async function promptMatrix(): Promise<string[] | undefined | null> {
   return parseMatrixInput(selection);
 }
 
-function collectMatrices(current: string[] | undefined, value?: string): string[] | undefined {
-  if (!value) {
-    return current;
-  }
-  return [...(current ?? []), value];
-}
-
 function parseMatrixInput(input: string): string[] | undefined {
   const items = input
     .split(",")
@@ -474,87 +400,6 @@ function resolveSupportedEvents(workflow: Workflow): string[] {
   return ["push", "pull_request", "workflow_dispatch"];
 }
 
-type InputFileResult = {
-  ok: boolean;
-  envFile?: string;
-  varsFile?: string;
-  secretsFile?: string;
-  error?: string;
-};
-
-function prepareInputFiles(runDir: string, config: { env: Record<string, string>; vars: Record<string, string>; secrets: Record<string, string>; envFile?: string; varsFile?: string; secretsFile?: string }): InputFileResult {
-  const inputsDir = path.join(runDir, "inputs");
-  fs.mkdirSync(inputsDir, { recursive: true });
-
-  const envFile = buildInputFile(inputsDir, "env", config.envFile, config.env);
-  if (!envFile.ok) {
-    return envFile;
-  }
-
-  const varsFile = buildInputFile(inputsDir, "vars", config.varsFile, config.vars);
-  if (!varsFile.ok) {
-    return varsFile;
-  }
-
-  const secretsFile = buildInputFile(inputsDir, "secrets", config.secretsFile, config.secrets);
-  if (!secretsFile.ok) {
-    return secretsFile;
-  }
-
-  return {
-    ok: true,
-    envFile: envFile.path,
-    varsFile: varsFile.path,
-    secretsFile: secretsFile.path
-  };
-}
-
-function buildInputFile(
-  inputsDir: string,
-  label: string,
-  sourcePath: string | undefined,
-  entries: Record<string, string>
-): { ok: boolean; path?: string; error?: string } {
-  const hasEntries = Object.keys(entries).length > 0;
-  if (!sourcePath && !hasEntries) {
-    return { ok: true };
-  }
-
-  let content = "";
-  if (sourcePath) {
-    if (!fs.existsSync(sourcePath)) {
-      return { ok: false, error: `Configured ${label} file not found: ${sourcePath}` };
-    }
-    const raw = fs.readFileSync(sourcePath, "utf-8");
-    content = raw.endsWith("\n") || raw.length === 0 ? raw : `${raw}\n`;
-  }
-
-  if (hasEntries) {
-    content += serializeKeyValues(entries);
-  }
-
-  const outPath = path.join(inputsDir, `${label}.env`);
-  fs.writeFileSync(outPath, content);
-  return { ok: true, path: outPath };
-}
-
-function serializeKeyValues(entries: Record<string, string>): string {
-  return Object.entries(entries)
-    .map(([key, value]) => `${key}=${escapeEnvValue(value)}`)
-    .join("\n")
-    .concat("\n");
-}
-
-function escapeEnvValue(value: string): string {
-  return value.replace(/\n/g, "\\n");
-}
-
-async function runPreflightChecks(containerEngine: string, interactive: boolean): Promise<boolean> {
-  const actOk = await ensureActAvailable(interactive);
-  const engineOk = await ensureEngineAvailable(containerEngine, interactive);
-  return actOk && engineOk;
-}
-
 async function runWithInk(
   adapter: EngineAdapter,
   plan: RunPlan,
@@ -592,156 +437,4 @@ async function runWithInk(
       resolve(finalResult ?? { exitCode: 1, logsPath: "" });
     });
   });
-}
-
-function printHelp(): void {
-  process.stdout.write(`xci run [options]\n\n`);
-  process.stdout.write(`Options:\n`);
-  process.stdout.write(`  --workflow <file>     Workflow file name or id\n`);
-  process.stdout.write(`  --job <ids>           Comma-separated job ids\n`);
-  process.stdout.write(`  --all                 Run all jobs\n`);
-  process.stdout.write(`  --event <name>        Event name (push, pull_request, workflow_dispatch)\n`);
-  process.stdout.write(`  --event-path <file>   JSON payload path\n`);
-  process.stdout.write(`  --matrix <k:v>        Matrix override (repeatable)\n`);
-  process.stdout.write(`  --preset <name>       Preset id\n`);
-  process.stdout.write(`  --json                Print JSON summary\n`);
-  process.stdout.write(`  -h, --help            Show help\n`);
-  process.stdout.write(`  -v, --version         Show version\n`);
-}
-
-function readPackageVersion(): string {
-  const pkgUrl = new URL("../../package.json", import.meta.url);
-  const raw = fs.readFileSync(pkgUrl, "utf-8");
-  const parsed = JSON.parse(raw) as { version?: string };
-  return parsed.version ?? "0.0.0";
-}
-
-async function checkCommand(command: string, args: string[], label: string): Promise<boolean> {
-  const { spawnSync } = await import("node:child_process");
-  const result = spawnSync(command, args, { stdio: "ignore" });
-  if (result.status !== 0) {
-    process.stderr.write(`${label} is not available. Install and retry.\n`);
-    return false;
-  }
-  return true;
-}
-
-async function ensureActAvailable(interactive: boolean): Promise<boolean> {
-  const ok = await checkCommand("act", ["--version"], "act");
-  if (ok || !interactive) {
-    return ok;
-  }
-  const shouldInstall = await confirm({
-    message: "act is not installed. Install it now?",
-    initialValue: true
-  });
-  if (isCancel(shouldInstall) || !shouldInstall) {
-    cancel("Canceled.");
-    return false;
-  }
-  const installed = await installAct();
-  if (!installed) {
-    process.stderr.write("Failed to install act. Install it manually and retry.\n");
-    return false;
-  }
-  return checkCommand("act", ["--version"], "act");
-}
-
-async function ensureEngineAvailable(engine: string, interactive: boolean): Promise<boolean> {
-  const ok = await checkCommand(engine, ["info"], engine);
-  if (ok || !interactive) {
-    return ok;
-  }
-  const shouldStart = await confirm({
-    message: `${engine} is not running. Start it now?`,
-    initialValue: true
-  });
-  if (isCancel(shouldStart) || !shouldStart) {
-    cancel("Canceled.");
-    return false;
-  }
-  const started = await startContainerEngine(engine);
-  if (!started) {
-    process.stderr.write(`Failed to start ${engine}. Please start it and retry.\n`);
-    return false;
-  }
-  return checkCommand(engine, ["info"], engine);
-}
-
-async function installAct(): Promise<boolean> {
-  const { spawnSync } = await import("node:child_process");
-  const platform = process.platform;
-  if (platform === "darwin") {
-    if (!(await commandExists("brew"))) {
-      process.stderr.write("Homebrew not found. Install Homebrew to install act.\n");
-      return false;
-    }
-    return spawnSync("brew", ["install", "act"], { stdio: "inherit" }).status === 0;
-  }
-
-  if (platform === "linux") {
-    if (await commandExists("apt-get")) {
-      if (spawnSync("sudo", ["apt-get", "update"], { stdio: "inherit" }).status !== 0) {
-        return false;
-      }
-      return spawnSync("sudo", ["apt-get", "install", "-y", "act"], { stdio: "inherit" }).status === 0;
-    }
-    if (await commandExists("dnf")) {
-      return spawnSync("sudo", ["dnf", "install", "-y", "act"], { stdio: "inherit" }).status === 0;
-    }
-    if (await commandExists("yum")) {
-      return spawnSync("sudo", ["yum", "install", "-y", "act"], { stdio: "inherit" }).status === 0;
-    }
-    if (await commandExists("pacman")) {
-      return spawnSync("sudo", ["pacman", "-S", "--noconfirm", "act"], { stdio: "inherit" }).status === 0;
-    }
-  }
-
-  if (platform === "win32") {
-    if (await commandExists("winget")) {
-      return spawnSync("winget", ["install", "--id", "nektos.act"], { stdio: "inherit" }).status === 0;
-    }
-    if (await commandExists("choco")) {
-      return spawnSync("choco", ["install", "act", "-y"], { stdio: "inherit" }).status === 0;
-    }
-  }
-
-  process.stderr.write("No supported package manager found for act installation.\n");
-  return false;
-}
-
-async function startContainerEngine(engine: string): Promise<boolean> {
-  const { spawnSync } = await import("node:child_process");
-  const platform = process.platform;
-
-  if (engine === "docker" && platform === "darwin") {
-    const openResult = spawnSync("open", ["-a", "Docker"], { stdio: "ignore" });
-    if (openResult.status !== 0) {
-      return false;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    return true;
-  }
-
-  if (platform === "linux") {
-    if (await commandExists("systemctl")) {
-      const result = spawnSync("sudo", ["systemctl", "start", engine], { stdio: "inherit" });
-      return result.status === 0;
-    }
-  }
-
-  if (engine === "podman") {
-    if (await commandExists("podman")) {
-      const result = spawnSync("podman", ["machine", "start"], { stdio: "inherit" });
-      return result.status === 0;
-    }
-  }
-
-  return false;
-}
-
-async function commandExists(command: string): Promise<boolean> {
-  const { spawnSync } = await import("node:child_process");
-  const checker = process.platform === "win32" ? "where" : "which";
-  return spawnSync(checker, [command], { stdio: "ignore" }).status === 0;
 }

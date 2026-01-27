@@ -1,23 +1,11 @@
 import path from "node:path";
 import process from "node:process";
-import {
-	cancel,
-	intro,
-	isCancel,
-	multiselect,
-	outro,
-	select,
-	text,
-} from "@clack/prompts";
+import { cancel, intro, isCancel, multiselect, outro, select, text } from "@clack/prompts";
 import { render } from "ink";
 import React from "react";
 import { loadConfig } from "../config/load-config.js";
 import { discoverWorkflows } from "../core/discovery.js";
-import type {
-	EngineAdapter,
-	EngineContext,
-	EngineRunResult,
-} from "../core/engine.js";
+import type { EngineAdapter, EngineContext, EngineRunResult } from "../core/engine.js";
 import {
 	buildRunPlan,
 	expandJobIdsWithNeeds,
@@ -61,8 +49,7 @@ export async function runCli(): Promise<void> {
 	try {
 		workflows = discoverWorkflows(repoRoot);
 	} catch (error) {
-		const message =
-			error instanceof Error ? error.message : "Unknown workflow parse error.";
+		const message = error instanceof Error ? error.message : "Unknown workflow parse error.";
 		process.stderr.write(`Workflow parse error: ${message}\n`);
 		process.exitCode = 1;
 		return;
@@ -117,11 +104,7 @@ export async function runCli(): Promise<void> {
 		return;
 	}
 
-	const presets = resolvePresets(
-		config.presets,
-		workflow.jobs,
-		config.defaultPreset,
-	);
+	const presets = resolvePresets(config.presets, workflow.jobs, config.defaultPreset);
 	const presetId = args.preset ?? config.defaultPreset ?? "quick";
 	const preset = presets.find((item) => item.id === presetId) ?? presets[0];
 
@@ -157,9 +140,7 @@ export async function runCli(): Promise<void> {
 	}
 
 	if (!selectedJobs) {
-		selectedJobs = preset?.jobIds?.length
-			? preset.jobIds
-			: availableJobs.map((job) => job.id);
+		selectedJobs = preset?.jobIds?.length ? preset.jobIds : availableJobs.map((job) => job.id);
 	}
 
 	const expanded = expandJobIdsWithNeeds(workflow, selectedJobs);
@@ -184,10 +165,7 @@ export async function runCli(): Promise<void> {
 		return;
 	}
 
-	const platformMap = resolvePlatformMap(
-		config.runtime.image,
-		config.runtime.platformMap,
-	);
+	const platformMap = resolvePlatformMap(config.runtime.image, config.runtime.platformMap);
 
 	const engineContext: EngineContext = {
 		repoRoot,
@@ -203,10 +181,7 @@ export async function runCli(): Promise<void> {
 		matrixOverride: plan.jobs[0]?.matrix ?? undefined,
 	};
 
-	const preflightOk = await runPreflightChecks(
-		config.runtime.container,
-		isTty && !args.json,
-	);
+	const preflightOk = await runPreflightChecks(config.runtime.container, isTty && !args.json);
 	if (!preflightOk) {
 		process.exitCode = 1;
 		return;
@@ -215,7 +190,7 @@ export async function runCli(): Promise<void> {
 	const adapter = new ActAdapter();
 	const planned = await adapter.plan(engineContext, plan);
 
-	let result;
+	let result: EngineRunResult | null = null;
 	if (isTty && !args.json) {
 		result = await runWithInk(
 			adapter,
@@ -227,9 +202,7 @@ export async function runCli(): Promise<void> {
 		outro(`Logs: ${result.logsPath}`);
 	} else {
 		if (!args.json) {
-			process.stdout.write(
-				`Running ${planned.jobs.length} job(s) with act...\\n`,
-			);
+			process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
 		}
 		result = await adapter.run(planned, engineContext);
 		if (!args.json) {
@@ -240,33 +213,20 @@ export async function runCli(): Promise<void> {
 		}
 	}
 	if (args.json) {
-		const summary = await buildJsonSummary(
-			repoRoot,
-			plan.runId,
-			workflow,
-			ordered,
-		);
+		const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
 		process.stdout.write(`${JSON.stringify(summary)}\\n`);
 	}
 	process.exitCode = result.exitCode;
 }
 
-function resolveWorkflow(
-	workflows: Workflow[],
-	selector?: string,
-): Workflow | undefined {
+function resolveWorkflow(workflows: Workflow[], selector?: string): Workflow | undefined {
 	if (!selector) {
 		return workflows.length === 1 ? workflows[0] : undefined;
 	}
-	return workflows.find(
-		(wf) => wf.id.endsWith(selector) || wf.name === selector,
-	);
+	return workflows.find((wf) => wf.id.endsWith(selector) || wf.name === selector);
 }
 
-function resolveJobsFromArgs(
-	options: CliOptions,
-	preset?: RunPreset,
-): string[] | undefined {
+function resolveJobsFromArgs(options: CliOptions, preset?: RunPreset): string[] | undefined {
 	if (options.all) {
 		return undefined;
 	}
@@ -315,10 +275,7 @@ function resolvePresets(
 		});
 	}
 
-	if (
-		defaultPreset &&
-		!resolved.some((preset) => preset.id === defaultPreset)
-	) {
+	if (defaultPreset && !resolved.some((preset) => preset.id === defaultPreset)) {
 		resolved.unshift({
 			id: defaultPreset,
 			label: defaultPreset,
@@ -329,10 +286,7 @@ function resolvePresets(
 	return resolved;
 }
 
-async function selectEvent(
-	defaultEvent: string,
-	events: string[],
-): Promise<string | null> {
+async function selectEvent(defaultEvent: string, events: string[]): Promise<string | null> {
 	const selection = await select({
 		message: "Select an event",
 		initialValue: events.includes(defaultEvent) ? defaultEvent : events[0],
@@ -345,10 +299,7 @@ async function selectEvent(
 	return selection;
 }
 
-async function selectPreset(
-	presets: RunPreset[],
-	current: string,
-): Promise<RunPreset | null> {
+async function selectPreset(presets: RunPreset[], current: string): Promise<RunPreset | null> {
 	const selection = await select({
 		message: "Select a preset",
 		initialValue: current,

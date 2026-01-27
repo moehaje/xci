@@ -1,99 +1,101 @@
 import fs from "node:fs";
 
 export type CliOptions = {
-  command: "run";
-  workflow?: string;
-  jobs?: string[];
-  all?: boolean;
-  json?: boolean;
-  event?: string;
-  eventPath?: string;
-  matrix?: string[];
-  preset?: string;
-  help?: boolean;
-  version?: boolean;
-  unknown?: string[];
+	command: "run";
+	workflow?: string;
+	jobs?: string[];
+	all?: boolean;
+	json?: boolean;
+	event?: string;
+	eventPath?: string;
+	matrix?: string[];
+	preset?: string;
+	help?: boolean;
+	version?: boolean;
+	unknown?: string[];
 };
 
 export function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { command: "run", unknown: [] };
-  const args = [...argv];
-  if (args[0] && !args[0].startsWith("-")) {
-    options.command = "run";
-    args.shift();
-  }
+	const options: CliOptions = { command: "run", unknown: [] };
+	const args = [...argv];
+	if (args[0] && !args[0].startsWith("-")) {
+		options.command = "run";
+		args.shift();
+	}
 
-  while (args.length) {
-    const arg = args.shift();
-    switch (arg) {
-      case "--help":
-      case "-h":
-        options.help = true;
-        break;
-      case "--version":
-      case "-v":
-        options.version = true;
-        break;
-      case "--workflow":
-        options.workflow = args.shift();
-        break;
-      case "--job":
-        options.jobs = (args.shift() ?? "").split(",").filter(Boolean);
-        break;
-      case "--all":
-        options.all = true;
-        break;
-      case "--event":
-        options.event = args.shift();
-        break;
-      case "--event-path":
-        options.eventPath = args.shift();
-        break;
-      case "--matrix":
-        options.matrix = collectMatrices(options.matrix, args.shift());
-        break;
-      case "--preset":
-        options.preset = args.shift();
-        break;
-      case "--json":
-        options.json = true;
-        break;
-      default:
-        if (arg) {
-          options.unknown?.push(arg);
-        }
-        break;
-    }
-  }
+	while (args.length) {
+		const arg = args.shift();
+		switch (arg) {
+			case "--help":
+			case "-h":
+				options.help = true;
+				break;
+			case "--version":
+			case "-v":
+				options.version = true;
+				break;
+			case "--workflow":
+				options.workflow = args.shift();
+				break;
+			case "--job":
+				options.jobs = (args.shift() ?? "").split(",").filter(Boolean);
+				break;
+			case "--all":
+				options.all = true;
+				break;
+			case "--event":
+				options.event = args.shift();
+				break;
+			case "--event-path":
+				options.eventPath = args.shift();
+				break;
+			case "--matrix":
+				options.matrix = collectMatrices(options.matrix, args.shift());
+				break;
+			case "--preset":
+				options.preset = args.shift();
+				break;
+			case "--json":
+				options.json = true;
+				break;
+			default:
+				if (arg) {
+					options.unknown?.push(arg);
+				}
+				break;
+		}
+	}
 
-  return options;
+	return options;
 }
 
 export function printHelp(): void {
-  process.stdout.write(`xci run [options]\n\n`);
-  process.stdout.write(`Options:\n`);
-  process.stdout.write(`  --workflow <file>     Workflow file name or id\n`);
-  process.stdout.write(`  --job <ids>           Comma-separated job ids\n`);
-  process.stdout.write(`  --all                 Run all jobs\n`);
-  process.stdout.write(`  --event <name>        Event name (push, pull_request, workflow_dispatch)\n`);
-  process.stdout.write(`  --event-path <file>   JSON payload path\n`);
-  process.stdout.write(`  --matrix <k:v>        Matrix override (repeatable)\n`);
-  process.stdout.write(`  --preset <name>       Preset id\n`);
-  process.stdout.write(`  --json                Print JSON summary\n`);
-  process.stdout.write(`  -h, --help            Show help\n`);
-  process.stdout.write(`  -v, --version         Show version\n`);
+	process.stdout.write(`xci run [options]\n\n`);
+	process.stdout.write(`Options:\n`);
+	process.stdout.write(`  --workflow <file>     Workflow file name or id\n`);
+	process.stdout.write(`  --job <ids>           Comma-separated job ids\n`);
+	process.stdout.write(`  --all                 Run all jobs\n`);
+	process.stdout.write(
+		`  --event <name>        Event name (push, pull_request, workflow_dispatch)\n`,
+	);
+	process.stdout.write(`  --event-path <file>   JSON payload path\n`);
+	process.stdout.write(`  --matrix <k:v>        Matrix override (repeatable)\n`);
+	process.stdout.write(`  --preset <name>       Preset id\n`);
+	process.stdout.write(`  --json                Print JSON summary\n`);
+	process.stdout.write(`  -h, --help            Show help\n`);
+	process.stdout.write(`  -v, --version         Show version\n`);
 }
 
 export function readPackageVersion(): string {
-  const pkgUrl = new URL("../../package.json", import.meta.url);
-  const raw = fs.readFileSync(pkgUrl, "utf-8");
-  const parsed = JSON.parse(raw) as { version?: string };
-  return parsed.version ?? "0.0.0";
+	const pkgUrl = new URL("../../package.json", import.meta.url);
+	const raw = fs.readFileSync(pkgUrl, "utf-8");
+	const parsed = JSON.parse(raw) as { version?: string };
+	return parsed.version ?? "0.0.0";
 }
 
 function collectMatrices(current: string[] | undefined, value?: string): string[] | undefined {
-  if (!value) {
-    return current;
-  }
-  return [...(current ?? []), value];
+	if (!value) {
+		return current;
+	}
+	return [...(current ?? []), value];
 }

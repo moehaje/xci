@@ -2,24 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type {
-	EngineAdapter,
-	EngineContext,
-	EngineRunResult,
-} from "../../core/engine.js";
-import type {
-	Job,
-	RunPlan,
-	RunRecord,
-	RunStatus,
-	Workflow,
-} from "../../core/types.js";
-import {
-	DEFAULT_VIEW,
-	LOG_TAIL_LINES,
-	POLL_INTERVAL_MS,
-	SPINNER_FRAMES,
-} from "./constants.js";
+import type { EngineAdapter, EngineContext, EngineRunResult } from "../../core/engine.js";
+import type { Job, RunPlan, RunRecord, RunStatus, Workflow } from "../../core/types.js";
+import { DEFAULT_VIEW, LOG_TAIL_LINES, POLL_INTERVAL_MS, SPINNER_FRAMES } from "./constants.js";
 import type { DiagramLine } from "./diagram.js";
 import { buildDiagramLines } from "./diagram.js";
 import { formatDuration } from "./format.js";
@@ -47,18 +32,14 @@ export function RunView({
 }: RunViewProps): JSX.Element {
 	const { exit } = useApp();
 	const [runRecord, setRunRecord] = useState<RunRecord | null>(null);
-  const [statusText, setStatusText] = useState<RunStatus>("pending");
+	const [statusText, setStatusText] = useState<RunStatus>("pending");
 	const [readError, setReadError] = useState<string | null>(null);
 	const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_VIEW);
 	const [selectedJobIndex, setSelectedJobIndex] = useState(0);
 	const [selectedStepIndex, setSelectedStepIndex] = useState(0);
-	const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>(
-		{},
-	);
+	const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
 	const [stepOutputs, setStepOutputs] = useState<Record<string, string[]>>({});
-	const [stepStatuses, setStepStatuses] = useState<Record<string, RunStatus>>(
-		{},
-	);
+	const [stepStatuses, setStepStatuses] = useState<Record<string, RunStatus>>({});
 	const [logError, setLogError] = useState<string | null>(null);
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
 	const [liveMode, setLiveMode] = useState(false);
@@ -68,9 +49,7 @@ export function RunView({
 	const logBuffers = useRef(new Map<string, string>());
 	const liveOutputUsed = useRef(false);
 	const flushTimer = useRef<NodeJS.Timeout | null>(null);
-	const selectedJobRef = useRef<
-		{ jobId: string; status: RunStatus } | undefined
-	>(undefined);
+	const selectedJobRef = useRef<{ jobId: string; status: RunStatus } | undefined>(undefined);
 	const selectedStepsRef = useRef<Job["steps"]>([]);
 
 	const orderedJobs = useMemo(() => {
@@ -89,13 +68,8 @@ export function RunView({
 	}, [workflow.jobs]);
 
 	const selectedJob = orderedJobs[selectedJobIndex];
-	const selectedJobModel = selectedJob
-		? (jobLookup.get(selectedJob.jobId) ?? null)
-		: null;
-	const selectedSteps = useMemo(
-		() => selectedJobModel?.steps ?? [],
-		[selectedJobModel],
-	);
+	const selectedJobModel = selectedJob ? (jobLookup.get(selectedJob.jobId) ?? null) : null;
+	const selectedSteps = useMemo(() => selectedJobModel?.steps ?? [], [selectedJobModel]);
 
 	useEffect(() => {
 		selectedJobRef.current = selectedJob ?? undefined;
@@ -128,11 +102,7 @@ export function RunView({
 				if (!buffered || !jobNow || jobNow.jobId !== jobId) {
 					return;
 				}
-				const parsed = parseStepData(
-					selectedStepsRef.current,
-					buffered,
-					jobNow.status,
-				);
+				const parsed = parseStepData(selectedStepsRef.current, buffered, jobNow.status);
 				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
 				setStepOutputs(parsed.outputs);
 			}, 100);
@@ -179,8 +149,7 @@ export function RunView({
 					setRunRecord(parsed);
 					setReadError(null);
 				} catch (error) {
-					const message =
-						error instanceof Error ? error.message : "Unknown error";
+					const message = error instanceof Error ? error.message : "Unknown error";
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 						setReadError(`Failed to read run record: ${message}`);
 					}
@@ -211,11 +180,7 @@ export function RunView({
 		if (liveMode || liveOutputUsed.current) {
 			const buffer = logBuffers.current.get(currentJob.jobId);
 			if (buffer) {
-				const parsed = parseStepData(
-					selectedSteps,
-					buffer,
-					currentJob.status,
-				);
+				const parsed = parseStepData(selectedSteps, buffer, currentJob.status);
 				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
 				setStepOutputs(parsed.outputs);
 			}
@@ -230,17 +195,12 @@ export function RunView({
 			void (async () => {
 				try {
 					const raw = await fs.promises.readFile(logPath, "utf-8");
-					const parsed = parseStepData(
-						selectedSteps,
-						raw,
-						currentJob.status,
-					);
+					const parsed = parseStepData(selectedSteps, raw, currentJob.status);
 					setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
 					setStepOutputs(parsed.outputs);
 					setLogError(null);
 				} catch (error) {
-					const message =
-						error instanceof Error ? error.message : "Unknown error";
+					const message = error instanceof Error ? error.message : "Unknown error";
 					if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
 						setLogError(`Failed to read logs: ${message}`);
 					}
@@ -277,9 +237,7 @@ export function RunView({
 				return;
 			}
 			if (key.rightArrow) {
-				setSelectedJobIndex((prev) =>
-					Math.min(orderedJobs.length - 1, prev + 1),
-				);
+				setSelectedJobIndex((prev) => Math.min(orderedJobs.length - 1, prev + 1));
 				setSelectedStepIndex(0);
 				return;
 			}
@@ -288,9 +246,7 @@ export function RunView({
 				return;
 			}
 			if (key.downArrow) {
-				setSelectedStepIndex((prev) =>
-					Math.min(selectedSteps.length - 1, prev + 1),
-				);
+				setSelectedStepIndex((prev) => Math.min(selectedSteps.length - 1, prev + 1));
 				return;
 			}
 			if (input === " " || key.return) {
@@ -317,18 +273,13 @@ export function RunView({
 			</Box>
 
 			{viewMode === "summary" ? (
-				<Box
-					flexDirection="column"
-					borderStyle="round"
-					paddingX={2}
-					paddingY={1}
-				>
+				<Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
 					<Text dimColor>Summary</Text>
-					{diagramLines.map((line, index) => (
-						<Text key={`diagram-line-${index}`}>
-							{line.segments.map((segment, segmentIndex) => (
+					{diagramLines.map((line) => (
+						<Text key={line.id}>
+							{line.segments.map((segment) => (
 								<Text
-									key={`segment-${index}-${segmentIndex}`}
+									key={segment.id}
 									color={segment.color}
 									dimColor={segment.dim}
 								>
@@ -340,13 +291,7 @@ export function RunView({
 				</Box>
 			) : (
 				<Box flexDirection="row" gap={2}>
-					<Box
-						flexDirection="column"
-						width={28}
-						borderStyle="round"
-						paddingX={1}
-						paddingY={1}
-					>
+					<Box flexDirection="column" width={28} borderStyle="round" paddingX={1} paddingY={1}>
 						<Text dimColor>Jobs</Text>
 						{orderedJobs.map((job, index) => {
 							const isSelected = index === selectedJobIndex;
@@ -363,20 +308,12 @@ export function RunView({
 							);
 						})}
 					</Box>
-					<Box
-						flexDirection="column"
-						flexGrow={1}
-						borderStyle="round"
-						paddingX={2}
-						paddingY={1}
-					>
+					<Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={2} paddingY={1}>
 						<Text>{selectedJob?.jobId ?? "No job selected"}</Text>
 						{selectedJob ? (
 							<Text dimColor>
 								{STATUS_LABELS[selectedJob.status]}{" "}
-								{selectedJob.durationMs
-									? `· ${formatDuration(selectedJob.durationMs)}`
-									: ""}
+								{selectedJob.durationMs ? `· ${formatDuration(selectedJob.durationMs)}` : ""}
 							</Text>
 						) : null}
 						<Box flexDirection="column" marginTop={1}>
@@ -404,13 +341,11 @@ export function RunView({
 													{stepOutput.length === 0 ? (
 														<Text dimColor>Waiting for output...</Text>
 													) : (
-														stepOutput
-															.slice(-LOG_TAIL_LINES)
-															.map((line, lineIndex) => (
-																<Text key={`${step.id}-${lineIndex}`} dimColor>
-																	{line}
-																</Text>
-															))
+														stepOutput.slice(-LOG_TAIL_LINES).map((line, lineIndex) => (
+															<Text key={`${step.id}-${lineIndex}`} dimColor>
+																{line}
+															</Text>
+														))
 													)}
 												</Box>
 											) : null}
@@ -425,8 +360,8 @@ export function RunView({
 
 			<Box marginTop={1}>
 				<Text dimColor>
-					Tab: switch view · S: summary · D: details · Arrows: navigate ·
-					Space/Enter: toggle · Q: exit
+					Tab: switch view · S: summary · D: details · Arrows: navigate · Space/Enter: toggle · Q:
+					exit
 				</Text>
 			</Box>
 			{statusText !== "running" ? (

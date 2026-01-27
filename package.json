@@ -1,62 +1,65 @@
 {
-  "name": "xci",
-  "version": "0.1.0",
-  "description": "Local GitHub Actions runner UX powered by act.",
-  "license": "MIT",
-  "author": "Moe Haje <hello@moee.dev> (https://moee.dev)",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/moehaje/xci.git"
-  },
-  "bugs": {
-    "url": "https://github.com/moehaje/xci/issues"
-  },
-  "homepage": "https://github.com/moehaje/xci#readme",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "engines": {
-    "node": ">=18"
-  },
-  "keywords": [
-    "github-actions",
-    "ci",
-    "act",
-    "cli",
-    "tui"
-  ],
-  "bin": {
-    "xci": "dist/index.js"
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/ensure-shebang.js",
-    "dev": "tsx src/index.ts",
-    "prepack": "npm run build",
-    "type-check": "tsc -p tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@clack/prompts": "^0.7.0",
-    "ink": "^4.4.1",
-    "react": "^18.2.0",
-    "yaml": "^2.4.5",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@types/node": "^20.14.10",
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
-  }
+	"name": "xci",
+	"version": "0.1.0",
+	"description": "Local GitHub Actions runner UX powered by act.",
+	"license": "MIT",
+	"author": "Moe Haje <hello@moee.dev> (https://moee.dev)",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/moehaje/xci.git"
+	},
+	"bugs": {
+		"url": "https://github.com/moehaje/xci/issues"
+	},
+	"homepage": "https://github.com/moehaje/xci#readme",
+	"type": "module",
+	"main": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"engines": {
+		"node": ">=18"
+	},
+	"keywords": [
+		"github-actions",
+		"ci",
+		"act",
+		"cli",
+		"tui"
+	],
+	"bin": {
+		"xci": "dist/index.js"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "tsc -p tsconfig.json && node scripts/ensure-shebang.js",
+		"dev": "tsx src/index.ts",
+		"format": "biome format --write .",
+		"lint": "biome lint .",
+		"prepack": "npm run build",
+		"type-check": "tsc -p tsconfig.json --noEmit"
+	},
+	"dependencies": {
+		"@clack/prompts": "^0.7.0",
+		"ink": "^4.4.1",
+		"react": "^18.2.0",
+		"yaml": "^2.4.5",
+		"zod": "^3.23.8"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.13",
+		"@types/node": "^20.14.10",
+		"@types/react": "^18.3.1",
+		"@types/react-dom": "^18.3.0",
+		"tsx": "^4.7.0",
+		"typescript": "^5.3.3"
+	}
 }

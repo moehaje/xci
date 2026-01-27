@@ -430,7 +430,7 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
 
   let lastRunningIndex: number | null = null;
   let failedIndex: number | null = null;
-  const lines = raw.split(/\r?\n/);
+  const lines = raw.split(/\r?\n/).map(stripAnsi);
   for (const line of lines) {
     const startMatch = line.match(/⭐\s+Run\s+(.+)$/);
     if (startMatch) {
@@ -506,5 +506,13 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
 }
 
 function normalizeStepName(name: string): string {
-  return name.replace(/^(main|post)\s+/i, "").trim().toLowerCase();
+  return name
+    .replace(/\s*\[[^\]]+]\s*$/g, "")
+    .replace(/^(main|post)\s+/i, "")
+    .trim()
+    .toLowerCase();
+}
+
+function stripAnsi(input: string): string {
+  return input.replace(/\u001b\[[0-9;]*m/g, "");
 }

@@ -16,9 +16,16 @@ export type RunViewProps = {
 
 const MAX_LOG_LINES = 80;
 const POLL_INTERVAL_MS = 500;
-const SPINNER_FRAMES = ["|", "/", "-", "\\"];
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const LOG_TAIL_LINES = 12;
 const DEFAULT_VIEW: ViewMode = "summary";
+const STATUS_LABELS: Record<RunStatus, string> = {
+  pending: "queued",
+  running: "running",
+  success: "success",
+  failed: "failed",
+  canceled: "canceled"
+};
 
 export function RunView({
   adapter,
@@ -192,38 +199,43 @@ export function RunView({
         <Text>
           {workflow.name} · {plan.event.name} · {plan.runId}
         </Text>
-        <Text dimColor>Status: {statusText}</Text>
+        <Text dimColor>
+          {renderStatusGlyph(statusText as RunStatus, spinnerIndex)} {STATUS_LABELS[statusText as RunStatus]}
+        </Text>
       </Box>
 
       {viewMode === "summary" ? (
-        <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
-          <Text>Summary</Text>
+        <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+          <Text dimColor>Summary</Text>
           {diagramLines.map((line, index) => (
             <Text key={`${line}-${index}`}>{line}</Text>
           ))}
         </Box>
       ) : (
         <Box flexDirection="row" gap={2}>
-          <Box flexDirection="column" width={26} borderStyle="round" paddingX={1} paddingY={0}>
-            <Text>All jobs</Text>
+          <Box flexDirection="column" width={28} borderStyle="round" paddingX={1} paddingY={1}>
+            <Text dimColor>Jobs</Text>
             {orderedJobs.map((job, index) => {
               const isSelected = index === selectedJobIndex;
+              const glyph = renderStatusGlyph(job.status, spinnerIndex);
               return (
                 <Text
                   key={job.jobId}
                   color={colorForStatus(job.status)}
                   backgroundColor={isSelected ? "gray" : undefined}
+                  bold={isSelected}
                 >
-                  {formatStatusText(job.status, spinnerIndex)} {job.jobId}
+                  {glyph} {job.jobId}
                 </Text>
               );
             })}
           </Box>
-          <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={1} paddingY={0}>
+          <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={2} paddingY={1}>
             <Text>{selectedJob?.jobId ?? "No job selected"}</Text>
             {selectedJob ? (
               <Text dimColor>
-                {selectedJob.status} {selectedJob.durationMs ? `· ${formatDuration(selectedJob.durationMs)}` : ""}
+                {STATUS_LABELS[selectedJob.status]}{" "}
+                {selectedJob.durationMs ? `· ${formatDuration(selectedJob.durationMs)}` : ""}
               </Text>
             ) : null}
             <Box flexDirection="column" marginTop={1}>
@@ -235,14 +247,16 @@ export function RunView({
                   const isExpanded = Boolean(expandedSteps[step.id]);
                   const stepStatus = stepStatuses[step.id] ?? "pending";
                   const stepOutput = stepOutputs[step.id] ?? [];
+                  const caret = isExpanded ? "▾" : "▸";
+                  const glyph = renderStatusGlyph(stepStatus, spinnerIndex);
                   return (
                     <Box flexDirection="column" key={step.id}>
                       <Text
                         color={colorForStatus(stepStatus)}
                         backgroundColor={isSelected ? "gray" : undefined}
+                        bold={isSelected}
                       >
-                        {formatStatusText(stepStatus, spinnerIndex)} {step.name}
-                        {isExpanded ? " [-]" : " [+]"}
+                        {glyph} {caret} {step.name}
                       </Text>
                       {isExpanded ? (
                         <Box flexDirection="column" paddingLeft={2}>
@@ -329,7 +343,7 @@ function buildDiagramLines(
     columns[depth].push(buildJobLabel(job, spinnerIndex));
   });
 
-  const columnWidths = columns.map((column) => Math.max(0, ...column.map((item) => item.length), 12));
+  const columnWidths = columns.map((column) => Math.max(0, ...column.map((item) => item.length), 16));
   const maxRows = Math.max(...columns.map((column) => column.length), 1);
 
   const lines: string[] = [];
@@ -340,7 +354,7 @@ function buildDiagramLines(
       const padded = padRight(text, columnWidths[col]);
       line += padded;
       if (col < columns.length - 1) {
-        line += "  ->  ";
+        line += "  ──→  ";
       }
     }
     lines.push(line.trimEnd());
@@ -360,16 +374,16 @@ function buildJobLabel(
 function formatStatusText(status: RunStatus, spinnerIndex: number): string {
   switch (status) {
     case "success":
-      return "ok";
+      return "●";
     case "failed":
-      return "!!";
+      return "✕";
     case "running":
-      return SPINNER_FRAMES[spinnerIndex] ?? "|";
+      return SPINNER_FRAMES[spinnerIndex] ?? "⠋";
     case "canceled":
-      return "--";
+      return "◌";
     case "pending":
     default:
-      return "..";
+      return "○";
   }
 }
 
@@ -386,6 +400,10 @@ function colorForStatus(status: RunStatus): "green" | "red" | "yellow" | "gray" 
     default:
       return undefined;
   }
+}
+
+function renderStatusGlyph(status: RunStatus, spinnerIndex: number): string {
+  return formatStatusText(status, spinnerIndex);
 }
 
 function deriveStepStatus(jobStatus: RunStatus, index: number): RunStatus {

@@ -36,7 +36,7 @@ export function RunView({
   const [selectedJobIndex, setSelectedJobIndex] = useState(0);
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
-  const [jobLogTail, setJobLogTail] = useState<string[]>([]);
+  const [stepOutputs, setStepOutputs] = useState<Record<string, string[]>>({});
   const [stepStatuses, setStepStatuses] = useState<Record<string, RunStatus>>({});
   const [logError, setLogError] = useState<string | null>(null);
   const [spinnerIndex, setSpinnerIndex] = useState(0);
@@ -125,9 +125,9 @@ export function RunView({
       }
       try {
         const raw = fs.readFileSync(logPath, "utf-8");
-        const lines = raw.split(/\r?\n/).filter((line) => line.length > 0);
-        setJobLogTail(lines.slice(-LOG_TAIL_LINES));
-        setStepStatuses(parseStepStatuses(selectedSteps, raw, selectedJob.status));
+        const parsed = parseStepData(selectedSteps, raw, selectedJob.status);
+        setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
+        setStepOutputs(parsed.outputs);
         setLogError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
@@ -233,7 +233,8 @@ export function RunView({
                 selectedSteps.map((step, index) => {
                   const isSelected = index === selectedStepIndex;
                   const isExpanded = Boolean(expandedSteps[step.id]);
-                  const stepStatus = stepStatuses[step.id] ?? deriveStepStatus(selectedJob?.status ?? "pending", index);
+                  const stepStatus = stepStatuses[step.id] ?? "pending";
+                  const stepOutput = stepOutputs[step.id] ?? [];
                   return (
                     <Box flexDirection="column" key={step.id}>
                       <Text
@@ -245,10 +246,10 @@ export function RunView({
                       </Text>
                       {isExpanded ? (
                         <Box flexDirection="column" paddingLeft={2}>
-                          {jobLogTail.length === 0 ? (
+                          {stepOutput.length === 0 ? (
                             <Text dimColor>Waiting for output...</Text>
                           ) : (
-                            jobLogTail.map((line, lineIndex) => (
+                            stepOutput.slice(-LOG_TAIL_LINES).map((line, lineIndex) => (
                               <Text key={`${step.id}-${lineIndex}`} dimColor>
                                 {line}
                               </Text>
@@ -414,10 +415,15 @@ function padRight(value: string, length: number): string {
   return value + " ".repeat(length - value.length);
 }
 
-function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatus): Record<string, RunStatus> {
+function parseStepData(
+  steps: Job["steps"],
+  raw: string,
+  jobStatus: RunStatus
+): { statuses: Record<string, RunStatus>; outputs: Record<string, string[]> } {
   const statusMap: Record<string, RunStatus> = {};
+  const outputMap: Record<string, string[]> = {};
   if (steps.length === 0) {
-    return statusMap;
+    return { statuses: statusMap, outputs: outputMap };
   }
 
   const nameToIndex = new Map<string, number>();
@@ -430,16 +436,22 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
 
   let lastRunningIndex: number | null = null;
   let failedIndex: number | null = null;
+  let lastFailureIndex: number | null = null;
+  let currentIndex: number | null = null;
   const lines = raw.split(/\r?\n/).map(stripAnsi);
   for (const line of lines) {
     const startMatch = line.match(/⭐\s+Run\s+(.+)$/);
     if (startMatch) {
       const key = normalizeStepName(startMatch[1]);
       const index = nameToIndex.get(key);
-      if (index !== undefined) {
-        statusMap[steps[index].id] = "running";
-        lastRunningIndex = index;
+      if (index === undefined) {
+        currentIndex = null;
+        continue;
       }
+      statusMap[steps[index].id] = "running";
+      lastRunningIndex = index;
+      currentIndex = index;
+      outputMap[steps[index].id] = outputMap[steps[index].id] ?? [];
       continue;
     }
 
@@ -452,6 +464,9 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
         if (lastRunningIndex === index) {
           lastRunningIndex = null;
         }
+        if (currentIndex === index) {
+          currentIndex = null;
+        }
       }
       continue;
     }
@@ -463,8 +478,36 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
       if (index !== undefined) {
         statusMap[steps[index].id] = "failed";
         failedIndex = index;
+        lastFailureIndex = index;
         if (lastRunningIndex === index) {
           lastRunningIndex = null;
+        }
+        if (currentIndex === index) {
+          currentIndex = null;
+        }
+      }
+      continue;
+    }
+
+    if (line.includes("Failed but continue next step")) {
+      if (lastFailureIndex !== null) {
+        const stepId = steps[lastFailureIndex]?.id;
+        if (stepId) {
+          statusMap[stepId] = "success";
+        }
+      }
+      continue;
+    }
+
+    if (currentIndex !== null) {
+      if (line.trim().length > 0) {
+        const stepId = steps[currentIndex]?.id;
+        if (stepId) {
+          outputMap[stepId] = outputMap[stepId] ?? [];
+          outputMap[stepId].push(line);
+          if (outputMap[stepId].length > MAX_LOG_LINES) {
+            outputMap[stepId] = outputMap[stepId].slice(-MAX_LOG_LINES);
+          }
         }
       }
     }
@@ -472,9 +515,11 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
 
   if (jobStatus === "success") {
     for (const step of steps) {
-      statusMap[step.id] = "success";
+      if (!statusMap[step.id]) {
+        statusMap[step.id] = "success";
+      }
     }
-    return statusMap;
+    return { statuses: statusMap, outputs: outputMap };
   }
 
   if (jobStatus === "failed") {
@@ -490,8 +535,14 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
         }
         statusMap[step.id] = index <= failureIndex ? "success" : "canceled";
       });
+    } else {
+      for (const step of steps) {
+        if (!statusMap[step.id]) {
+          statusMap[step.id] = "canceled";
+        }
+      }
     }
-    return statusMap;
+    return { statuses: statusMap, outputs: outputMap };
   }
 
   if (jobStatus === "canceled") {
@@ -500,9 +551,10 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
         statusMap[step.id] = "canceled";
       }
     }
+    return { statuses: statusMap, outputs: outputMap };
   }
 
-  return statusMap;
+  return { statuses: statusMap, outputs: outputMap };
 }
 
 function normalizeStepName(name: string): string {
@@ -515,4 +567,30 @@ function normalizeStepName(name: string): string {
 
 function stripAnsi(input: string): string {
   return input.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+function mergeStepStatuses(
+  previous: Record<string, RunStatus>,
+  next: Record<string, RunStatus>
+): Record<string, RunStatus> {
+  const merged: Record<string, RunStatus> = { ...previous };
+  for (const [stepId, status] of Object.entries(next)) {
+    const current = merged[stepId];
+    if (!current) {
+      merged[stepId] = status;
+      continue;
+    }
+    if (isFinalStatus(current)) {
+      if (isFinalStatus(status) && status !== current) {
+        merged[stepId] = status;
+      }
+      continue;
+    }
+    merged[stepId] = status;
+  }
+  return merged;
+}
+
+function isFinalStatus(status: RunStatus): boolean {
+  return status === "success" || status === "failed" || status === "canceled";
 }

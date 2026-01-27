@@ -4,5 +4,6 @@ dist
 .agents
 .codex
 .docs
+.tmp
 
 TODO.md

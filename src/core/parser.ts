@@ -5,6 +5,7 @@ import { Job, Step, Workflow } from "./types.js";
 
 type WorkflowYaml = {
   name?: string;
+  on?: string | string[] | Record<string, unknown>;
   jobs?: Record<string, JobYaml>;
 };
 
@@ -48,6 +49,7 @@ export function parseWorkflow(workflowPath: string): Workflow {
     id: workflowPath,
     name: String(parsed?.name ?? path.basename(workflowPath)),
     path: workflowPath,
+    events: parseWorkflowEvents(parsed?.on),
     jobs
   };
 }
@@ -93,4 +95,19 @@ function normalizeRunsOn(runsOn?: string | string[]): string | undefined {
     return undefined;
   }
   return Array.isArray(runsOn) ? runsOn.join(", ") : runsOn;
+}
+
+function parseWorkflowEvents(
+  trigger: WorkflowYaml["on"]
+): string[] {
+  if (!trigger) {
+    return [];
+  }
+  if (typeof trigger === "string") {
+    return [trigger];
+  }
+  if (Array.isArray(trigger)) {
+    return trigger.map((value) => String(value));
+  }
+  return Object.keys(trigger);
 }

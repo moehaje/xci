@@ -1,5 +1,6 @@
 import path from "node:path";
 import process from "node:process";
+import fs from "node:fs";
 import {
   cancel,
   confirm,
@@ -17,6 +18,7 @@ import { RunPreset, Workflow } from "../core/types.js";
 import { ActAdapter } from "../engines/act/actAdapter.js";
 import { EngineContext } from "../core/engine.js";
 import { loadConfig } from "../config/loadConfig.js";
+import { RunStore } from "../store/runStore.js";
 
 type CliOptions = {
   command: "run";
@@ -149,6 +151,15 @@ export async function runCli(): Promise<void> {
     matrixOverride: args.matrix ?? preset?.matrixOverride
   });
 
+  const runStore = new RunStore(path.join(repoRoot, ".xci", "runs"));
+  const runDir = runStore.createRunDir(plan.runId);
+  const inputFiles = prepareInputFiles(runDir, config);
+  if (!inputFiles.ok) {
+    process.stderr.write(`${inputFiles.error}\n`);
+    process.exitCode = 2;
+    return;
+  }
+
   const platformMap = resolvePlatformMap(config.runtime.image, config.runtime.platformMap);
 
   const engineContext: EngineContext = {
@@ -159,9 +170,9 @@ export async function runCli(): Promise<void> {
     artifactDir: path.join(repoRoot, ".xci", "runs", plan.runId, "artifacts"),
     containerArchitecture: config.runtime.architecture,
     platformMap,
-    envFile: config.envFile,
-    varsFile: config.varsFile,
-    secretsFile: config.secretsFile,
+    envFile: inputFiles.envFile,
+    varsFile: inputFiles.varsFile,
+    secretsFile: inputFiles.secretsFile,
     matrixOverride: plan.jobs[0]?.matrix ?? undefined
   };
 
@@ -432,6 +443,81 @@ function resolveSupportedEvents(workflow: Workflow): string[] {
     return workflow.events;
   }
   return ["push", "pull_request", "workflow_dispatch"];
+}
+
+type InputFileResult = {
+  ok: boolean;
+  envFile?: string;
+  varsFile?: string;
+  secretsFile?: string;
+  error?: string;
+};
+
+function prepareInputFiles(runDir: string, config: { env: Record<string, string>; vars: Record<string, string>; secrets: Record<string, string>; envFile?: string; varsFile?: string; secretsFile?: string }): InputFileResult {
+  const inputsDir = path.join(runDir, "inputs");
+  fs.mkdirSync(inputsDir, { recursive: true });
+
+  const envFile = buildInputFile(inputsDir, "env", config.envFile, config.env);
+  if (!envFile.ok) {
+    return envFile;
+  }
+
+  const varsFile = buildInputFile(inputsDir, "vars", config.varsFile, config.vars);
+  if (!varsFile.ok) {
+    return varsFile;
+  }
+
+  const secretsFile = buildInputFile(inputsDir, "secrets", config.secretsFile, config.secrets);
+  if (!secretsFile.ok) {
+    return secretsFile;
+  }
+
+  return {
+    ok: true,
+    envFile: envFile.path,
+    varsFile: varsFile.path,
+    secretsFile: secretsFile.path
+  };
+}
+
+function buildInputFile(
+  inputsDir: string,
+  label: string,
+  sourcePath: string | undefined,
+  entries: Record<string, string>
+): { ok: boolean; path?: string; error?: string } {
+  const hasEntries = Object.keys(entries).length > 0;
+  if (!sourcePath && !hasEntries) {
+    return { ok: true };
+  }
+
+  let content = "";
+  if (sourcePath) {
+    if (!fs.existsSync(sourcePath)) {
+      return { ok: false, error: `Configured ${label} file not found: ${sourcePath}` };
+    }
+    const raw = fs.readFileSync(sourcePath, "utf-8");
+    content = raw.endsWith("\n") || raw.length === 0 ? raw : `${raw}\n`;
+  }
+
+  if (hasEntries) {
+    content += serializeKeyValues(entries);
+  }
+
+  const outPath = path.join(inputsDir, `${label}.env`);
+  fs.writeFileSync(outPath, content);
+  return { ok: true, path: outPath };
+}
+
+function serializeKeyValues(entries: Record<string, string>): string {
+  return Object.entries(entries)
+    .map(([key, value]) => `${key}=${escapeEnvValue(value)}`)
+    .join("\n")
+    .concat("\n");
+}
+
+function escapeEnvValue(value: string): string {
+  return value.replace(/\n/g, "\\n");
 }
 
 async function runPreflightChecks(containerEngine: string, interactive: boolean): Promise<boolean> {

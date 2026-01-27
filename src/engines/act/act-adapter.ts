@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type { EngineAdapter, EngineCapabilities, EngineContext, EngineRunResult } from "../../core/engine.js";
 import type { JobRun, RunPlan, RunRecord } from "../../core/types.js";
-import { RunStore } from "../../store/runStore.js";
+import { RunStore } from "../../store/run-store.js";
 
 export class ActAdapter implements EngineAdapter {
   readonly id = "act";

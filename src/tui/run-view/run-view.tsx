@@ -8,6 +8,7 @@ import type {
 	EngineRunResult,
 } from "../../core/engine.js";
 import type {
+	Job,
 	RunPlan,
 	RunRecord,
 	RunStatus,
@@ -59,11 +60,17 @@ export function RunView({
 	);
 	const [logError, setLogError] = useState<string | null>(null);
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
+	const [liveMode, setLiveMode] = useState(false);
 	const running = useRef(false);
 	const runReadInFlight = useRef(false);
 	const logReadInFlight = useRef(false);
 	const logBuffers = useRef(new Map<string, string>());
 	const liveOutputUsed = useRef(false);
+	const flushTimer = useRef<NodeJS.Timeout | null>(null);
+	const selectedJobRef = useRef<
+		{ jobId: string; status: RunStatus } | undefined
+	>(undefined);
+	const selectedStepsRef = useRef<Job["steps"]>([]);
 
 	const orderedJobs = useMemo(() => {
 		return plan.jobs.map((job) => {
@@ -89,23 +96,47 @@ export function RunView({
 		[selectedJobModel],
 	);
 
+	useEffect(() => {
+		selectedJobRef.current = selectedJob ?? undefined;
+		selectedStepsRef.current = selectedSteps;
+	}, [selectedJob, selectedSteps]);
+
 	const appendOutput = useCallback(
 		(chunk: string, _source: "stdout" | "stderr", jobId?: string) => {
 			if (!jobId) {
 				return;
 			}
 			liveOutputUsed.current = true;
+			if (!liveMode) {
+				setLiveMode(true);
+			}
 			const current = logBuffers.current.get(jobId) ?? "";
 			const next = current + chunk;
 			logBuffers.current.set(jobId, next);
-			if (jobId !== selectedJob?.jobId) {
+			const currentJob = selectedJobRef.current;
+			if (!currentJob || jobId !== currentJob.jobId) {
 				return;
 			}
-			const parsed = parseStepData(selectedSteps, next, selectedJob.status);
-			setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
-			setStepOutputs(parsed.outputs);
+			if (flushTimer.current) {
+				return;
+			}
+			flushTimer.current = setTimeout(() => {
+				flushTimer.current = null;
+				const buffered = logBuffers.current.get(jobId);
+				const jobNow = selectedJobRef.current;
+				if (!buffered || !jobNow || jobNow.jobId !== jobId) {
+					return;
+				}
+				const parsed = parseStepData(
+					selectedStepsRef.current,
+					buffered,
+					jobNow.status,
+				);
+				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
+				setStepOutputs(parsed.outputs);
+			}, 100);
 		},
-		[selectedJob?.jobId, selectedJob?.status, selectedSteps],
+		[liveMode],
 	);
 
 	const diagramLines = useMemo(() => {
@@ -170,24 +201,24 @@ export function RunView({
 		if (!runRecord?.logDir) {
 			return;
 		}
-		const selectedJobRef = orderedJobs[selectedJobIndex];
-		if (!selectedJobRef) {
+		const currentJob = orderedJobs[selectedJobIndex];
+		if (!currentJob) {
 			return;
 		}
-		if (liveOutputUsed.current) {
-			const buffer = logBuffers.current.get(selectedJobRef.jobId);
+		if (liveMode || liveOutputUsed.current) {
+			const buffer = logBuffers.current.get(currentJob.jobId);
 			if (buffer) {
 				const parsed = parseStepData(
 					selectedSteps,
 					buffer,
-					selectedJobRef.status,
+					currentJob.status,
 				);
 				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
 				setStepOutputs(parsed.outputs);
 			}
 			return;
 		}
-		const logPath = path.join(runRecord.logDir, `${selectedJobRef.jobId}.log`);
+		const logPath = path.join(runRecord.logDir, `${currentJob.jobId}.log`);
 		const interval = setInterval(() => {
 			if (logReadInFlight.current) {
 				return;
@@ -199,7 +230,7 @@ export function RunView({
 					const parsed = parseStepData(
 						selectedSteps,
 						raw,
-						selectedJobRef.status,
+						currentJob.status,
 					);
 					setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
 					setStepOutputs(parsed.outputs);
@@ -216,7 +247,7 @@ export function RunView({
 			})();
 		}, POLL_INTERVAL_MS);
 		return () => clearInterval(interval);
-	}, [runRecord?.logDir, selectedJobIndex, selectedSteps, orderedJobs]);
+	}, [runRecord?.logDir, selectedJobIndex, selectedSteps, orderedJobs, liveMode]);
 
 	useInput((input, key) => {
 		if (input === "q" && statusText !== "running") {

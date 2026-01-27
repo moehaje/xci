@@ -3,13 +3,7 @@ import path from "node:path";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { EngineAdapter, EngineContext, EngineRunResult } from "../core/engine.js";
-import { RunPlan, RunRecord, RunStatus, Workflow } from "../core/types.js";
-
-type LogLine = {
-  id: number;
-  text: string;
-  source: "stdout" | "stderr";
-};
+import { Job, RunPlan, RunRecord, RunStatus, Workflow } from "../core/types.js";
 
 export type RunViewProps = {
   adapter: EngineAdapter;
@@ -20,8 +14,11 @@ export type RunViewProps = {
   onComplete: (result: EngineRunResult) => void;
 };
 
-const MAX_LOG_LINES = 200;
+const MAX_LOG_LINES = 80;
 const POLL_INTERVAL_MS = 500;
+const SPINNER_FRAMES = ["|", "/", "-", "\\"];
+const LOG_TAIL_LINES = 12;
+const DEFAULT_VIEW: ViewMode = "summary";
 
 export function RunView({
   adapter,
@@ -33,29 +30,41 @@ export function RunView({
 }: RunViewProps): JSX.Element {
   const { exit } = useApp();
   const [runRecord, setRunRecord] = useState<RunRecord | null>(null);
-  const [logLines, setLogLines] = useState<LogLine[]>([]);
   const [statusText, setStatusText] = useState("starting");
   const [readError, setReadError] = useState<string | null>(null);
-  const lineId = useRef(0);
+  const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_VIEW);
+  const [selectedJobIndex, setSelectedJobIndex] = useState(0);
+  const [selectedStepIndex, setSelectedStepIndex] = useState(0);
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
+  const [jobLogTail, setJobLogTail] = useState<string[]>([]);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [spinnerIndex, setSpinnerIndex] = useState(0);
   const running = useRef(false);
 
-  const appendOutput = useCallback((chunk: string, source: "stdout" | "stderr") => {
-    const parts = chunk.split(/\r?\n/);
-    setLogLines((prev) => {
-      const next = [...prev];
-      for (let i = 0; i < parts.length; i += 1) {
-        if (parts[i] === "" && i === parts.length - 1) {
-          continue;
-        }
-        next.push({
-          id: lineId.current++,
-          text: parts[i],
-          source
-        });
-      }
-      return next.slice(-MAX_LOG_LINES);
+  const appendOutput = useCallback((_chunk: string) => {}, []);
+
+  const orderedJobs = useMemo(() => {
+    return plan.jobs.map((job) => {
+      const record = runRecord?.jobs.find((item) => item.jobId === job.jobId);
+      return {
+        jobId: job.jobId,
+        status: record?.status ?? "pending",
+        durationMs: record?.durationMs
+      };
     });
-  }, []);
+  }, [plan.jobs, runRecord]);
+
+  const jobLookup = useMemo(() => {
+    return new Map(workflow.jobs.map((job) => [job.id, job]));
+  }, [workflow.jobs]);
+
+  const selectedJob = orderedJobs[selectedJobIndex];
+  const selectedJobModel = selectedJob ? jobLookup.get(selectedJob.jobId) ?? null : null;
+  const selectedSteps = useMemo(() => selectedJobModel?.steps ?? [], [selectedJobModel]);
+
+  const diagramLines = useMemo(() => {
+    return buildDiagramLines(workflow, orderedJobs, spinnerIndex);
+  }, [orderedJobs, spinnerIndex, workflow]);
 
   useEffect(() => {
     if (running.current) {
@@ -68,11 +77,10 @@ export function RunView({
       const result = await adapter.run(plan, { ...context, onOutput: appendOutput });
       setStatusText(result.exitCode === 0 ? "success" : "failed");
       onComplete(result);
-      exit();
     };
 
     start();
-  }, [adapter, appendOutput, context, exit, onComplete, plan]);
+  }, [adapter, appendOutput, context, onComplete, plan]);
 
   useEffect(() => {
     const runPath = path.join(runStoreBase, plan.runId, "run.json");
@@ -94,24 +102,87 @@ export function RunView({
     return () => clearInterval(interval);
   }, [plan.runId, runStoreBase]);
 
-  useInput((input) => {
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSpinnerIndex((prev) => (prev + 1) % SPINNER_FRAMES.length);
+    }, 120);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!runRecord?.logDir) {
+      return;
+    }
+    const selectedJob = orderedJobs[selectedJobIndex];
+    if (!selectedJob) {
+      return;
+    }
+    const logPath = path.join(runRecord.logDir, `${selectedJob.jobId}.log`);
+    const interval = setInterval(() => {
+      if (!fs.existsSync(logPath)) {
+        return;
+      }
+      try {
+        const raw = fs.readFileSync(logPath, "utf-8");
+        const lines = raw.split(/\r?\n/).filter((line) => line.length > 0);
+        setJobLogTail(lines.slice(-LOG_TAIL_LINES));
+        setLogError(null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        setLogError(`Failed to read logs: ${message}`);
+      }
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [runRecord?.logDir, selectedJobIndex]);
+
+  useInput((input, key) => {
     if (input === "q" && statusText !== "running") {
       exit();
+      return;
     }
-  }, { isActive: statusText !== "running" });
+    if (input === "tab") {
+      setViewMode((prev) => (prev === "summary" ? "details" : "summary"));
+      return;
+    }
+    if (input === "s") {
+      setViewMode("summary");
+      return;
+    }
+    if (input === "d") {
+      setViewMode("details");
+      return;
+    }
 
-  const orderedJobs = useMemo(() => {
-    return plan.jobs.map((job) => {
-      const record = runRecord?.jobs.find((item) => item.jobId === job.jobId);
-      return {
-        jobId: job.jobId,
-        status: record?.status ?? "pending",
-        durationMs: record?.durationMs
-      };
-    });
-  }, [plan.jobs, runRecord]);
-
-  const logTail = useMemo(() => logLines.slice(-20), [logLines]);
+    if (viewMode === "details") {
+      if (key.leftArrow) {
+        setSelectedJobIndex((prev) => Math.max(0, prev - 1));
+        setSelectedStepIndex(0);
+        return;
+      }
+      if (key.rightArrow) {
+        setSelectedJobIndex((prev) => Math.min(orderedJobs.length - 1, prev + 1));
+        setSelectedStepIndex(0);
+        return;
+      }
+      if (key.upArrow) {
+        setSelectedStepIndex((prev) => Math.max(0, prev - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setSelectedStepIndex((prev) => Math.min(selectedSteps.length - 1, prev + 1));
+        return;
+      }
+      if (input === " " || key.return) {
+        const step = selectedSteps[selectedStepIndex];
+        if (step) {
+          setExpandedSteps((prev) => ({
+            ...prev,
+            [step.id]: !prev[step.id]
+          }));
+        }
+      }
+    }
+  });
 
   return (
     <Box flexDirection="column" padding={1}>
@@ -122,32 +193,84 @@ export function RunView({
         <Text dimColor>Status: {statusText}</Text>
       </Box>
 
-      <Box flexDirection="column" marginBottom={1}>
-        <Text>Jobs</Text>
-        {orderedJobs.map((job) => (
-          <Text key={job.jobId}>
-            {formatStatus(job.status)} {job.jobId}
-            {job.durationMs ? ` (${formatDuration(job.durationMs)})` : ""}
-          </Text>
-        ))}
-      </Box>
+      {viewMode === "summary" ? (
+        <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
+          <Text>Summary</Text>
+          {diagramLines.map((line, index) => (
+            <Text key={`${line}-${index}`}>{line}</Text>
+          ))}
+        </Box>
+      ) : (
+        <Box flexDirection="row" gap={2}>
+          <Box flexDirection="column" width={26} borderStyle="round" paddingX={1} paddingY={0}>
+            <Text>All jobs</Text>
+            {orderedJobs.map((job, index) => {
+              const isSelected = index === selectedJobIndex;
+              return (
+                <Text
+                  key={job.jobId}
+                  color={colorForStatus(job.status)}
+                  backgroundColor={isSelected ? "gray" : undefined}
+                >
+                  {formatStatusText(job.status, spinnerIndex)} {job.jobId}
+                </Text>
+              );
+            })}
+          </Box>
+          <Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={1} paddingY={0}>
+            <Text>{selectedJob?.jobId ?? "No job selected"}</Text>
+            {selectedJob ? (
+              <Text dimColor>
+                {selectedJob.status} {selectedJob.durationMs ? `· ${formatDuration(selectedJob.durationMs)}` : ""}
+              </Text>
+            ) : null}
+            <Box flexDirection="column" marginTop={1}>
+              {selectedSteps.length === 0 ? (
+                <Text dimColor>No steps found.</Text>
+              ) : (
+                selectedSteps.map((step, index) => {
+                  const isSelected = index === selectedStepIndex;
+                  const isExpanded = Boolean(expandedSteps[step.id]);
+                  const stepStatus = deriveStepStatus(selectedJob?.status ?? "pending", index);
+                  return (
+                    <Box flexDirection="column" key={step.id}>
+                      <Text
+                        color={colorForStatus(stepStatus)}
+                        backgroundColor={isSelected ? "gray" : undefined}
+                      >
+                        {formatStatusText(stepStatus, spinnerIndex)} {step.name}
+                        {isExpanded ? " [-]" : " [+]"}
+                      </Text>
+                      {isExpanded ? (
+                        <Box flexDirection="column" paddingLeft={2}>
+                          {jobLogTail.length === 0 ? (
+                            <Text dimColor>Waiting for output...</Text>
+                          ) : (
+                            jobLogTail.map((line, lineIndex) => (
+                              <Text key={`${step.id}-${lineIndex}`} dimColor>
+                                {line}
+                              </Text>
+                            ))
+                          )}
+                        </Box>
+                      ) : null}
+                    </Box>
+                  );
+                })
+              )}
+            </Box>
+          </Box>
+        </Box>
+      )}
 
-      <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
-        <Text>Logs (latest)</Text>
-        {logTail.length === 0 ? (
-          <Text dimColor>Waiting for output...</Text>
-        ) : (
-          logTail.map((line) => (
-            <Text key={line.id} color={line.source === "stderr" ? "red" : undefined}>
-              {line.text}
-            </Text>
-          ))
-        )}
+      <Box marginTop={1}>
+        <Text dimColor>
+          Tab: switch view · S: summary · D: details · Arrows: navigate · Space/Enter: toggle · Q: exit
+        </Text>
       </Box>
-
       {statusText !== "running" ? (
         <Box marginTop={1}>
-          <Text dimColor>Press q to exit.</Text>
+          <Text dimColor>Run finished. Press q to exit.</Text>
         </Box>
       ) : null}
       {readError ? (
@@ -155,24 +278,118 @@ export function RunView({
           <Text color="red">{readError}</Text>
         </Box>
       ) : null}
+      {logError ? (
+        <Box marginTop={1}>
+          <Text color="red">{logError}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
 
-function formatStatus(status: RunStatus): JSX.Element {
+type ViewMode = "summary" | "details";
+
+function buildDiagramLines(
+  workflow: Workflow,
+  jobs: { jobId: string; status: RunStatus; durationMs?: number }[],
+  spinnerIndex: number
+): string[] {
+  if (jobs.length === 0) {
+    return ["No jobs selected."];
+  }
+  const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
+  const depths = new Map<string, number>();
+  const visiting = new Set<string>();
+
+  const resolveDepth = (jobId: string): number => {
+    if (depths.has(jobId)) {
+      return depths.get(jobId) ?? 0;
+    }
+    if (visiting.has(jobId)) {
+      return 0;
+    }
+    visiting.add(jobId);
+    const job = jobMap.get(jobId);
+    const needs = job?.needs ?? [];
+    const depth = needs.length === 0 ? 0 : Math.max(...needs.map(resolveDepth)) + 1;
+    depths.set(jobId, depth);
+    visiting.delete(jobId);
+    return depth;
+  };
+
+  jobs.forEach((job) => resolveDepth(job.jobId));
+  const maxDepth = Math.max(...Array.from(depths.values()), 0);
+  const columns: string[][] = Array.from({ length: maxDepth + 1 }, () => []);
+
+  jobs.forEach((job) => {
+    const depth = depths.get(job.jobId) ?? 0;
+    columns[depth].push(buildJobLabel(job, spinnerIndex));
+  });
+
+  const columnWidths = columns.map((column) => Math.max(0, ...column.map((item) => item.length), 12));
+  const maxRows = Math.max(...columns.map((column) => column.length), 1);
+
+  const lines: string[] = [];
+  for (let row = 0; row < maxRows; row += 1) {
+    let line = "";
+    for (let col = 0; col < columns.length; col += 1) {
+      const text = columns[col][row] ?? "";
+      const padded = padRight(text, columnWidths[col]);
+      line += padded;
+      if (col < columns.length - 1) {
+        line += "  ->  ";
+      }
+    }
+    lines.push(line.trimEnd());
+  }
+  return lines;
+}
+
+function buildJobLabel(
+  job: { jobId: string; status: RunStatus; durationMs?: number },
+  spinnerIndex: number
+): string {
+  const status = formatStatusText(job.status, spinnerIndex);
+  const duration = job.durationMs ? ` ${formatDuration(job.durationMs)}` : "";
+  return `${status} ${job.jobId}${duration}`;
+}
+
+function formatStatusText(status: RunStatus, spinnerIndex: number): string {
   switch (status) {
     case "success":
-      return <Text color="green">success</Text>;
+      return "ok";
     case "failed":
-      return <Text color="red">failed</Text>;
+      return "!!";
     case "running":
-      return <Text color="yellow">running</Text>;
+      return SPINNER_FRAMES[spinnerIndex] ?? "|";
     case "canceled":
-      return <Text color="gray">canceled</Text>;
+      return "--";
     case "pending":
     default:
-      return <Text dimColor>queued</Text>;
+      return "..";
   }
+}
+
+function colorForStatus(status: RunStatus): "green" | "red" | "yellow" | "gray" | undefined {
+  switch (status) {
+    case "success":
+      return "green";
+    case "failed":
+      return "red";
+    case "running":
+      return "yellow";
+    case "canceled":
+      return "gray";
+    default:
+      return undefined;
+  }
+}
+
+function deriveStepStatus(jobStatus: RunStatus, index: number): RunStatus {
+  if (jobStatus === "running") {
+    return index === 0 ? "running" : "pending";
+  }
+  return jobStatus;
 }
 
 function formatDuration(durationMs: number): string {
@@ -186,4 +403,11 @@ function formatDuration(durationMs: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.round(seconds % 60);
   return `${minutes}m${remainder}s`;
+}
+
+function padRight(value: string, length: number): string {
+  if (value.length >= length) {
+    return value;
+  }
+  return value + " ".repeat(length - value.length);
 }

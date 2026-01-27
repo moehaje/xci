@@ -25,7 +25,7 @@ type CliOptions = {
   mentionJson?: boolean;
   event?: string;
   eventPath?: string;
-  matrix?: Record<string, unknown>;
+  matrix?: string[];
   preset?: string;
 };
 
@@ -38,7 +38,15 @@ export async function runCli(): Promise<void> {
   }
 
   const repoRoot = process.cwd();
-  const workflows = discoverWorkflows(repoRoot);
+  let workflows: Workflow[] = [];
+  try {
+    workflows = discoverWorkflows(repoRoot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown workflow parse error.";
+    process.stderr.write(`Workflow parse error: ${message}\n`);
+    process.exitCode = 1;
+    return;
+  }
   if (workflows.length === 0) {
     process.stderr.write("No workflows found in .github/workflows.\n");
     process.exitCode = 1;
@@ -150,11 +158,17 @@ export async function runCli(): Promise<void> {
     matrixOverride: plan.jobs[0]?.matrix ?? undefined
   };
 
+  const preflightOk = await runPreflightChecks(config.runtime.container);
+  if (!preflightOk) {
+    process.exitCode = 1;
+    return;
+  }
+
   const adapter = new ActAdapter();
   const planned = await adapter.plan(engineContext, plan);
 
   let result;
-  if (isTty) {
+  if (isTty && !args.mentionJson) {
     const runSpinner = spinner();
     runSpinner.start(`Running ${planned.jobs.length} job(s) with act...`);
     result = await adapter.run(planned, engineContext);
@@ -164,7 +178,13 @@ export async function runCli(): Promise<void> {
     process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
     result = await adapter.run(planned, engineContext);
     process.stdout.write(`Finished with exit code ${result.exitCode}\\n`);
-    process.stdout.write(`Logs: ${result.logsPath}\\n`);
+    if (!args.mentionJson) {
+      process.stdout.write(`Logs: ${result.logsPath}\\n`);
+    }
+  }
+  if (args.mentionJson) {
+    const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
+    process.stdout.write(`${JSON.stringify(summary)}\\n`);
   }
   process.exitCode = result.exitCode;
 }
@@ -196,7 +216,7 @@ function parseArgs(argv: string[]): CliOptions {
         options.eventPath = args.shift();
         break;
       case "--matrix":
-        options.matrix = parseJson(args.shift());
+        options.matrix = collectMatrices(options.matrix, args.shift());
         break;
       case "--preset":
         options.preset = args.shift();
@@ -233,10 +253,7 @@ function resolveJobsFromArgs(options: CliOptions, preset?: RunPreset): string[] 
 }
 
 function resolvePresets(
-  presets: Record<
-    string,
-    { jobs: string[]; event?: { name: string; payloadPath?: string }; matrix?: Record<string, unknown> }
-  >,
+  presets: Record<string, { jobs: string[]; event?: { name: string; payloadPath?: string }; matrix?: string[] }>,
   availableJobs: { id: string }[],
   defaultPreset?: string
 ): RunPreset[] {
@@ -324,10 +341,10 @@ async function selectJobs(jobs: { id: string; name: string }[], initial: string[
   return selection;
 }
 
-async function promptMatrix(): Promise<Record<string, unknown> | undefined | null> {
+async function promptMatrix(): Promise<string[] | undefined | null> {
   const selection = await text({
-    message: "Matrix override (JSON, optional)",
-    placeholder: "{\"node\": [\"20\"]}"
+    message: "Matrix override (optional, format: key:value,key:value)",
+    placeholder: "node:20,os:ubuntu-latest"
   });
   if (isCancel(selection)) {
     cancel("Canceled.");
@@ -336,16 +353,72 @@ async function promptMatrix(): Promise<Record<string, unknown> | undefined | nul
   if (!selection) {
     return undefined;
   }
-  return parseJson(selection);
+  return parseMatrixInput(selection);
 }
 
-function parseJson(input?: string): Record<string, unknown> | undefined {
-  if (!input) {
-    return undefined;
+function collectMatrices(current: string[] | undefined, value?: string): string[] | undefined {
+  if (!value) {
+    return current;
   }
-  try {
-    return JSON.parse(input) as Record<string, unknown>;
-  } catch {
-    return undefined;
+  return [...(current ?? []), value];
+}
+
+function parseMatrixInput(input: string): string[] | undefined {
+  const items = input
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+}
+
+async function buildJsonSummary(
+  repoRoot: string,
+  runId: string,
+  workflow: Workflow,
+  orderedJobs: string[]
+): Promise<Record<string, unknown>> {
+  const { readFile } = await import("node:fs/promises");
+  const runFile = path.join(repoRoot, ".xci", "runs", runId, "run.json");
+  const raw = await readFile(runFile, "utf-8");
+  const run = JSON.parse(raw) as {
+    jobs: { jobId: string; status: string; exitCode?: number; durationMs?: number }[];
+    logDir?: string;
+    artifactDir?: string;
+  };
+
+  return {
+    runId,
+    workflow: {
+      id: workflow.id,
+      name: workflow.name,
+      path: workflow.path
+    },
+    jobs: orderedJobs.map((jobId) => {
+      const job = run.jobs.find((item) => item.jobId === jobId);
+      return {
+        jobId,
+        status: job?.status ?? "unknown",
+        exitCode: job?.exitCode,
+        durationMs: job?.durationMs
+      };
+    }),
+    logsDir: run.logDir,
+    artifactsDir: run.artifactDir
+  };
+}
+
+async function runPreflightChecks(containerEngine: string): Promise<boolean> {
+  const actOk = await checkCommand("act", ["--version"], "act");
+  const engineOk = await checkCommand(containerEngine, ["info"], containerEngine);
+  return actOk && engineOk;
+}
+
+async function checkCommand(command: string, args: string[], label: string): Promise<boolean> {
+  const { spawnSync } = await import("node:child_process");
+  const result = spawnSync(command, args, { stdio: "ignore" });
+  if (result.status !== 0) {
+    process.stderr.write(`${label} is not available. Install and retry.\n`);
+    return false;
   }
+  return true;
 }

@@ -254,7 +254,7 @@ export function RunView({
 			exit();
 			return;
 		}
-		if (input === "tab") {
+		if (key.tab || input === "\t") {
 			setViewMode((prev) => (prev === "summary" ? "details" : "summary"));
 			return;
 		}

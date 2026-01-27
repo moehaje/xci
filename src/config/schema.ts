@@ -17,17 +17,23 @@ export const ConfigSchema = z.object({
     .object({
       container: z.enum(["docker", "podman"]).default("docker"),
       architecture: z.string().default("amd64"),
-      image: z.record(z.string()).default({})
+      image: z.record(z.string()).default({}),
+      platformMap: z.record(z.string()).default({})
     })
     .default({
       container: "docker",
       architecture: "amd64",
-      image: {}
+      image: {},
+      platformMap: {}
     }),
   env: z.record(z.string()).default({}),
   vars: z.record(z.string()).default({}),
   secrets: z.record(z.string()).default({}),
-  presets: z.record(PresetSchema).default({})
+  presets: z.record(PresetSchema).default({}),
+  defaultPreset: z.string().optional(),
+  envFile: z.string().optional(),
+  varsFile: z.string().optional(),
+  secretsFile: z.string().optional()
 });
 
 export type XciConfig = z.infer<typeof ConfigSchema>;

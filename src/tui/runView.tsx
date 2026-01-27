@@ -420,21 +420,25 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
     return statusMap;
   }
 
-  const nameToStepId = new Map<string, string>();
-  for (const step of steps) {
-    nameToStepId.set(normalizeStepName(step.name), step.id);
-  }
+  const nameToIndex = new Map<string, number>();
+  steps.forEach((step, index) => {
+    const key = normalizeStepName(step.name);
+    if (!nameToIndex.has(key)) {
+      nameToIndex.set(key, index);
+    }
+  });
 
-  let lastRunningStepId: string | null = null;
+  let lastRunningIndex: number | null = null;
+  let failedIndex: number | null = null;
   const lines = raw.split(/\r?\n/);
   for (const line of lines) {
     const startMatch = line.match(/⭐\s+Run\s+(.+)$/);
     if (startMatch) {
       const key = normalizeStepName(startMatch[1]);
-      const stepId = nameToStepId.get(key);
-      if (stepId) {
-        statusMap[stepId] = "running";
-        lastRunningStepId = stepId;
+      const index = nameToIndex.get(key);
+      if (index !== undefined) {
+        statusMap[steps[index].id] = "running";
+        lastRunningIndex = index;
       }
       continue;
     }
@@ -442,11 +446,11 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
     const successMatch = line.match(/✅\s+Success\s+-\s+(.+)$/);
     if (successMatch) {
       const key = normalizeStepName(successMatch[1]);
-      const stepId = nameToStepId.get(key);
-      if (stepId) {
-        statusMap[stepId] = "success";
-        if (lastRunningStepId === stepId) {
-          lastRunningStepId = null;
+      const index = nameToIndex.get(key);
+      if (index !== undefined) {
+        statusMap[steps[index].id] = "success";
+        if (lastRunningIndex === index) {
+          lastRunningIndex = null;
         }
       }
       continue;
@@ -455,11 +459,12 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
     const failureMatch = line.match(/❌\s+Failure\s+-\s+(.+)$/);
     if (failureMatch) {
       const key = normalizeStepName(failureMatch[1]);
-      const stepId = nameToStepId.get(key);
-      if (stepId) {
-        statusMap[stepId] = "failed";
-        if (lastRunningStepId === stepId) {
-          lastRunningStepId = null;
+      const index = nameToIndex.get(key);
+      if (index !== undefined) {
+        statusMap[steps[index].id] = "failed";
+        failedIndex = index;
+        if (lastRunningIndex === index) {
+          lastRunningIndex = null;
         }
       }
     }
@@ -467,12 +472,34 @@ function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatu
 
   if (jobStatus === "success") {
     for (const step of steps) {
+      statusMap[step.id] = "success";
+    }
+    return statusMap;
+  }
+
+  if (jobStatus === "failed") {
+    if (failedIndex === null && lastRunningIndex !== null) {
+      statusMap[steps[lastRunningIndex].id] = "failed";
+      failedIndex = lastRunningIndex;
+    }
+    if (failedIndex !== null) {
+      const failureIndex = failedIndex;
+      steps.forEach((step, index) => {
+        if (statusMap[step.id]) {
+          return;
+        }
+        statusMap[step.id] = index <= failureIndex ? "success" : "canceled";
+      });
+    }
+    return statusMap;
+  }
+
+  if (jobStatus === "canceled") {
+    for (const step of steps) {
       if (!statusMap[step.id]) {
-        statusMap[step.id] = "success";
+        statusMap[step.id] = "canceled";
       }
     }
-  } else if (jobStatus === "failed" && lastRunningStepId) {
-    statusMap[lastRunningStepId] = "failed";
   }
 
   return statusMap;

@@ -34,34 +34,53 @@ export class ActAdapter implements EngineAdapter {
       return { exitCode: 1, logsPath: "" };
     }
 
-    const job = plan.jobs[0];
     const store = new RunStore(path.join(context.repoRoot, ".xci", "runs"));
     const runDir = store.createRunDir(plan.runId);
     const artifactsDir = store.createArtifactsDir(plan.runId);
-    const logsPath = store.createLogFile(plan.runId, job.jobId);
+    const logDir = store.createLogsDir(plan.runId);
     const eventPath = ensureEventPayload(plan.event.name, context.eventPayloadPath, runDir);
 
-    const engineArgs = buildActArgs(
-      {
-        ...context,
-        eventPayloadPath: eventPath,
-        artifactDir: artifactsDir
-      },
-      job.jobId,
-      job.matrix ?? null
-    );
-
-    const runRecord = createRunRecord(plan, artifactsDir, path.dirname(logsPath));
-    const jobRun = runRecord.jobs[0];
+    const runRecord = createRunRecord(plan, artifactsDir, logDir);
     store.writeRun(runRecord);
 
-    const logStream = fs.createWriteStream(logsPath, { flags: "a" });
-    const exitCode = await runAct(engineArgs, context.repoRoot, logStream, context.onOutput);
+    let lastLogsPath = "";
+    let exitCode = 0;
 
-    finalizeRunRecord(runRecord, jobRun, exitCode);
+    for (const [index, job] of plan.jobs.entries()) {
+      const logsPath = store.createLogFile(plan.runId, job.jobId);
+      lastLogsPath = logsPath;
+
+      const engineArgs = buildActArgs(
+        {
+          ...context,
+          eventPayloadPath: eventPath,
+          artifactDir: artifactsDir
+        },
+        job.jobId,
+        job.matrix ?? null
+      );
+
+      const jobRun = runRecord.jobs[index];
+      jobRun.status = "running";
+      jobRun.startedAt = new Date().toISOString();
+      store.writeRun(runRecord);
+
+      const logStream = fs.createWriteStream(logsPath, { flags: "a" });
+      exitCode = await runAct(engineArgs, context.repoRoot, logStream, context.onOutput);
+
+      finalizeJobRun(jobRun, exitCode);
+      store.writeRun(runRecord);
+
+      if (exitCode !== 0) {
+        markRemainingCanceled(runRecord, index + 1);
+        break;
+      }
+    }
+
+    finalizeRunRecord(runRecord);
     store.writeRun(runRecord);
 
-    return { exitCode, logsPath };
+    return { exitCode, logsPath: lastLogsPath };
   }
 }
 
@@ -90,6 +109,14 @@ function buildActArgs(
 
   for (const [key, value] of Object.entries(context.platformMap ?? {})) {
     args.push("--platform", `${key}=${value}`);
+  }
+
+  if (context.envFile) {
+    args.push("--env-file", context.envFile);
+  }
+
+  if (context.secretsFile) {
+    args.push("--secret-file", context.secretsFile);
   }
 
   if (context.extraArgs?.length) {
@@ -140,28 +167,43 @@ function createRunRecord(plan: RunPlan, artifactDir: string, logDir: string): Ru
     status: "running",
     createdAt: now,
     jobs: [
-      {
-        jobId: plan.jobs[0].jobId,
-        status: "running",
-        startedAt: now,
-        matrix: plan.jobs[0].matrix ?? null
-      }
+      ...plan.jobs.map((job) => ({
+        jobId: job.jobId,
+        status: "pending",
+        matrix: job.matrix ?? null
+      }))
     ],
     artifactDir,
     logDir
   };
 }
 
-function finalizeRunRecord(run: RunRecord, jobRun: JobRun, exitCode: number): void {
+function finalizeJobRun(jobRun: JobRun, exitCode: number): void {
   const finishedAt = new Date().toISOString();
-  const status = exitCode === 0 ? "success" : "failed";
-  const durationMs = new Date(finishedAt).getTime() - new Date(jobRun.startedAt ?? finishedAt).getTime();
-  jobRun.status = status;
+  const durationMs =
+    new Date(finishedAt).getTime() - new Date(jobRun.startedAt ?? finishedAt).getTime();
+  jobRun.status = exitCode === 0 ? "success" : "failed";
   jobRun.exitCode = exitCode;
   jobRun.finishedAt = finishedAt;
   jobRun.durationMs = durationMs;
-  run.status = status;
-  run.finishedAt = finishedAt;
+}
+
+function finalizeRunRecord(run: RunRecord): void {
+  const finishedAt = new Date().toISOString();
+  const hasFailure = run.jobs.some((job) => job.status === "failed");
+  const isRunning = run.jobs.some((job) => job.status === "running");
+  if (!isRunning) {
+    run.status = hasFailure ? "failed" : "success";
+    run.finishedAt = finishedAt;
+  }
+}
+
+function markRemainingCanceled(run: RunRecord, startIndex: number): void {
+  for (let i = startIndex; i < run.jobs.length; i += 1) {
+    if (run.jobs[i].status === "pending") {
+      run.jobs[i].status = "canceled";
+    }
+  }
 }
 
 function runAct(

@@ -15,6 +15,7 @@ export type EngineContext = {
   artifactDir: string;
   containerArchitecture?: string;
   envFile?: string;
+  varsFile?: string;
   secretsFile?: string;
   matrixOverride?: Record<string, unknown>;
   platformMap?: Record<string, string>;

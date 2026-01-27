@@ -1,2 +1,2 @@
-export type { RunViewProps } from "./runView/RunView.js";
-export { RunView } from "./runView/RunView.js";
+export type { RunViewProps } from "./run-view/run-view.js";
+export { RunView } from "./run-view/run-view.js";

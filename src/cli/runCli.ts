@@ -534,12 +534,12 @@ async function runWithInk(
 ): Promise<EngineRunResult> {
   return new Promise((resolve) => {
     let resolved = false;
+    let finalResult: EngineRunResult | null = null;
     const handleComplete = (result: EngineRunResult): void => {
       if (resolved) {
         return;
       }
-      resolved = true;
-      resolve(result);
+      finalResult = result;
     };
 
     const { waitUntilExit, unmount } = render(
@@ -555,6 +555,11 @@ async function runWithInk(
 
     waitUntilExit().then(() => {
       unmount();
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(finalResult ?? { exitCode: 1, logsPath: "" });
     });
   });
 }

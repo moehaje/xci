@@ -1,11 +1,27 @@
 {
   "name": "xci",
   "version": "0.1.0",
-  "private": true,
   "description": "Local GitHub Actions runner UX powered by act.",
   "license": "MIT",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "github-actions",
+    "ci",
+    "act",
+    "cli",
+    "tui"
+  ],
   "bin": {
     "xci": "dist/index.js"
   },
@@ -15,9 +31,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/ensure-shebang.js",
     "dev": "tsx src/index.ts",
-    "prepare": "pnpm build",
+    "prepack": "npm run build",
     "type-check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

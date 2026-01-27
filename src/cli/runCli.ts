@@ -32,10 +32,28 @@ type CliOptions = {
   eventPath?: string;
   matrix?: string[];
   preset?: string;
+  help?: boolean;
+  version?: boolean;
+  unknown?: string[];
 };
 
 export async function runCli(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (args.help) {
+    printHelp();
+    return;
+  }
+  if (args.version) {
+    const version = readPackageVersion();
+    process.stdout.write(`xci ${version}\n`);
+    return;
+  }
+  if (args.unknown?.length) {
+    process.stderr.write(`Unknown option(s): ${args.unknown.join(", ")}\n`);
+    process.stderr.write("Run `xci --help` for usage.\n");
+    process.exitCode = 2;
+    return;
+  }
   if (args.command !== "run") {
     process.stderr.write("Only `xci run` is supported right now.\n");
     process.exitCode = 2;
@@ -211,7 +229,7 @@ export async function runCli(): Promise<void> {
 }
 
 function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = { command: "run" };
+  const options: CliOptions = { command: "run", unknown: [] };
   const args = [...argv];
   if (args[0] && !args[0].startsWith("-")) {
     options.command = "run";
@@ -221,6 +239,14 @@ function parseArgs(argv: string[]): CliOptions {
   while (args.length) {
     const arg = args.shift();
     switch (arg) {
+      case "--help":
+      case "-h":
+        options.help = true;
+        break;
+      case "--version":
+      case "-v":
+        options.version = true;
+        break;
       case "--workflow":
         options.workflow = args.shift();
         break;
@@ -246,6 +272,9 @@ function parseArgs(argv: string[]): CliOptions {
         options.mentionJson = true;
         break;
       default:
+        if (arg) {
+          options.unknown?.push(arg);
+        }
         break;
     }
   }
@@ -562,6 +591,28 @@ async function runWithInk(
       resolve(finalResult ?? { exitCode: 1, logsPath: "" });
     });
   });
+}
+
+function printHelp(): void {
+  process.stdout.write(`xci run [options]\n\n`);
+  process.stdout.write(`Options:\n`);
+  process.stdout.write(`  --workflow <file>     Workflow file name or id\n`);
+  process.stdout.write(`  --job <ids>           Comma-separated job ids\n`);
+  process.stdout.write(`  --all                 Run all jobs\n`);
+  process.stdout.write(`  --event <name>        Event name (push, pull_request, workflow_dispatch)\n`);
+  process.stdout.write(`  --event-path <file>   JSON payload path\n`);
+  process.stdout.write(`  --matrix <k:v>        Matrix override (repeatable)\n`);
+  process.stdout.write(`  --preset <name>       Preset id\n`);
+  process.stdout.write(`  --json                Print JSON summary\n`);
+  process.stdout.write(`  -h, --help            Show help\n`);
+  process.stdout.write(`  -v, --version         Show version\n`);
+}
+
+function readPackageVersion(): string {
+  const pkgUrl = new URL("../../package.json", import.meta.url);
+  const raw = fs.readFileSync(pkgUrl, "utf-8");
+  const parsed = JSON.parse(raw) as { version?: string };
+  return parsed.version ?? "0.0.0";
 }
 
 async function checkCommand(command: string, args: string[], label: string): Promise<boolean> {

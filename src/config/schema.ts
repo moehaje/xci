@@ -8,7 +8,7 @@ export const PresetSchema = z.object({
       payloadPath: z.string().optional()
     })
     .optional(),
-  matrix: z.record(z.unknown()).optional()
+  matrix: z.array(z.string()).optional()
 });
 
 export const ConfigSchema = z.object({

@@ -2,10 +2,18 @@
   "name": "xci",
   "version": "0.1.0",
   "private": true,
+  "description": "Local GitHub Actions runner UX powered by act.",
+  "license": "MIT",
   "type": "module",
+  "main": "dist/index.js",
   "bin": {
     "xci": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",

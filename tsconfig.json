@@ -9,7 +9,9 @@
     "jsx": "react-jsx",
     "types": ["node"],
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true
   },
   "include": ["src"]
 }

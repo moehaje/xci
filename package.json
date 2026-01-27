@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Local GitHub Actions runner UX powered by act.",
   "license": "MIT",
+  "author": "Moe Haje <hello@moee.dev> (https://moee.dev)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/moehaje/xci.git"
+  },
+  "bugs": {
+    "url": "https://github.com/moehaje/xci/issues"
+  },
+  "homepage": "https://github.com/moehaje/xci#readme",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

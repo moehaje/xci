@@ -19,15 +19,15 @@ XCI is a local GitHub Actions runner UX that delegates execution to an engine (v
 ## Install
 
 ```bash
-pnpm add -D xci
+npm install --save-dev xci
 ```
 
 ## Usage
 
 ```bash
-pnpm exec xci run
-pnpm exec xci run --workflow ci.yml --event push --job build-and-test
-pnpm exec xci run --workflow ci.yml --all --json
+npx xci run
+npx xci run --workflow ci.yml --event push --job build-and-test
+npx xci run --workflow ci.yml --all --json
 ```
 
 ## Configuration
@@ -49,9 +49,9 @@ presets:
 ## Development
 
 ```bash
-pnpm install
-pnpm build
-pnpm type-check
+npm install
+npm run build
+npm run type-check
 ```
 
 ## License

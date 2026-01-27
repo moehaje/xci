@@ -5,9 +5,9 @@ Thanks for contributing to XCI.
 ## Setup
 
 ```bash
-pnpm install
-pnpm build
-pnpm type-check
+npm install
+npm run build
+npm run type-check
 ```
 
 ## Project Structure
@@ -30,5 +30,5 @@ pnpm type-check
 Run type checking before opening a PR:
 
 ```bash
-pnpm type-check
+npm run type-check
 ```

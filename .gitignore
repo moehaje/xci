@@ -1,9 +1,4 @@
 node_modules
 dist
 .DS_Store
-.agents
-.codex
-.docs
-.tmp
-
-TODO.md
+.npm-cache

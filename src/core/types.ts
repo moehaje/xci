@@ -39,7 +39,7 @@ export type RunPreset = {
   label: string;
   jobIds: string[];
   event?: EventSpec;
-  matrixOverride?: Record<string, unknown>;
+  matrixOverride?: string[];
 };
 
 export type RunPlan = {
@@ -52,7 +52,7 @@ export type RunPlan = {
 
 export type PlannedJob = {
   jobId: string;
-  matrix: Record<string, unknown> | null;
+  matrix: string[] | null;
   engineArgs: string[];
 };
 
@@ -65,7 +65,7 @@ export type JobRun = {
   finishedAt?: string;
   durationMs?: number;
   exitCode?: number;
-  matrix?: Record<string, unknown> | null;
+  matrix?: string[] | null;
 };
 
 export type RunRecord = {

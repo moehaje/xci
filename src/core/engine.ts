@@ -17,7 +17,7 @@ export type EngineContext = {
   envFile?: string;
   varsFile?: string;
   secretsFile?: string;
-  matrixOverride?: Record<string, unknown>;
+  matrixOverride?: string[];
   platformMap?: Record<string, string>;
   extraArgs?: string[];
   onOutput?: (chunk: string, source: "stdout" | "stderr") => void;

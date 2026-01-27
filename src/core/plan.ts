@@ -7,7 +7,7 @@ export type PlanInput = {
   eventName: string;
   eventPayloadPath?: string;
   preset?: RunPreset;
-  matrixOverride?: Record<string, unknown>;
+  matrixOverride?: string[];
 };
 
 export function buildRunPlan(input: PlanInput): RunPlan {

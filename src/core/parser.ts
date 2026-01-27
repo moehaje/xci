@@ -30,7 +30,15 @@ type StepYaml = {
 
 export function parseWorkflow(workflowPath: string): Workflow {
   const raw = fs.readFileSync(workflowPath, "utf-8");
-  const parsed = YAML.parse(raw) as WorkflowYaml;
+  const doc = YAML.parseDocument(raw);
+  if (doc.errors.length > 0) {
+    const error = doc.errors[0];
+    const line = error.linePos?.[0]?.line ?? 0;
+    const col = error.linePos?.[0]?.col ?? 0;
+    throw new Error(`${workflowPath}:${line}:${col} ${error.message}`);
+  }
+
+  const parsed = doc.toJSON() as WorkflowYaml;
 
   const jobs = Object.entries(parsed?.jobs ?? {}).map(([jobId, job]) =>
     parseJob(jobId, job)

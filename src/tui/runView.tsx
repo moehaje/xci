@@ -37,6 +37,7 @@ export function RunView({
   const [selectedStepIndex, setSelectedStepIndex] = useState(0);
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
   const [jobLogTail, setJobLogTail] = useState<string[]>([]);
+  const [stepStatuses, setStepStatuses] = useState<Record<string, RunStatus>>({});
   const [logError, setLogError] = useState<string | null>(null);
   const [spinnerIndex, setSpinnerIndex] = useState(0);
   const running = useRef(false);
@@ -126,6 +127,7 @@ export function RunView({
         const raw = fs.readFileSync(logPath, "utf-8");
         const lines = raw.split(/\r?\n/).filter((line) => line.length > 0);
         setJobLogTail(lines.slice(-LOG_TAIL_LINES));
+        setStepStatuses(parseStepStatuses(selectedSteps, raw, selectedJob.status));
         setLogError(null);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error";
@@ -133,7 +135,7 @@ export function RunView({
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [runRecord?.logDir, selectedJobIndex]);
+  }, [runRecord?.logDir, selectedJobIndex, selectedSteps, orderedJobs]);
 
   useInput((input, key) => {
     if (input === "q" && statusText !== "running") {
@@ -231,7 +233,7 @@ export function RunView({
                 selectedSteps.map((step, index) => {
                   const isSelected = index === selectedStepIndex;
                   const isExpanded = Boolean(expandedSteps[step.id]);
-                  const stepStatus = deriveStepStatus(selectedJob?.status ?? "pending", index);
+                  const stepStatus = stepStatuses[step.id] ?? deriveStepStatus(selectedJob?.status ?? "pending", index);
                   return (
                     <Box flexDirection="column" key={step.id}>
                       <Text
@@ -410,4 +412,72 @@ function padRight(value: string, length: number): string {
     return value;
   }
   return value + " ".repeat(length - value.length);
+}
+
+function parseStepStatuses(steps: Job["steps"], raw: string, jobStatus: RunStatus): Record<string, RunStatus> {
+  const statusMap: Record<string, RunStatus> = {};
+  if (steps.length === 0) {
+    return statusMap;
+  }
+
+  const nameToStepId = new Map<string, string>();
+  for (const step of steps) {
+    nameToStepId.set(normalizeStepName(step.name), step.id);
+  }
+
+  let lastRunningStepId: string | null = null;
+  const lines = raw.split(/\r?\n/);
+  for (const line of lines) {
+    const startMatch = line.match(/⭐\s+Run\s+(.+)$/);
+    if (startMatch) {
+      const key = normalizeStepName(startMatch[1]);
+      const stepId = nameToStepId.get(key);
+      if (stepId) {
+        statusMap[stepId] = "running";
+        lastRunningStepId = stepId;
+      }
+      continue;
+    }
+
+    const successMatch = line.match(/✅\s+Success\s+-\s+(.+)$/);
+    if (successMatch) {
+      const key = normalizeStepName(successMatch[1]);
+      const stepId = nameToStepId.get(key);
+      if (stepId) {
+        statusMap[stepId] = "success";
+        if (lastRunningStepId === stepId) {
+          lastRunningStepId = null;
+        }
+      }
+      continue;
+    }
+
+    const failureMatch = line.match(/❌\s+Failure\s+-\s+(.+)$/);
+    if (failureMatch) {
+      const key = normalizeStepName(failureMatch[1]);
+      const stepId = nameToStepId.get(key);
+      if (stepId) {
+        statusMap[stepId] = "failed";
+        if (lastRunningStepId === stepId) {
+          lastRunningStepId = null;
+        }
+      }
+    }
+  }
+
+  if (jobStatus === "success") {
+    for (const step of steps) {
+      if (!statusMap[step.id]) {
+        statusMap[step.id] = "success";
+      }
+    }
+  } else if (jobStatus === "failed" && lastRunningStepId) {
+    statusMap[lastRunningStepId] = "failed";
+  }
+
+  return statusMap;
+}
+
+function normalizeStepName(name: string): string {
+  return name.replace(/^(main|post)\s+/i, "").trim().toLowerCase();
 }

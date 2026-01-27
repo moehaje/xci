@@ -27,7 +27,12 @@ export function buildDiagramLines(
 	spinnerIndex: number,
 ): DiagramLine[] {
 	if (jobs.length === 0) {
-		return [{ segments: [{ text: "No jobs selected.", dim: true }] }];
+		return [
+			{
+				id: "line-empty",
+				segments: [{ id: "empty-message", text: "No jobs selected.", dim: true }],
+			},
+		];
 	}
 	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
 	const depths = new Map<string, number>();

@@ -1,6 +1,7 @@
 import path from "node:path";
 import process from "node:process";
 import fs from "node:fs";
+import React from "react";
 import {
   cancel,
   confirm,
@@ -9,16 +10,17 @@ import {
   multiselect,
   outro,
   select,
-  spinner,
   text
 } from "@clack/prompts";
+import { render } from "ink";
 import { discoverWorkflows } from "../core/discovery.js";
 import { buildRunPlan, expandJobIdsWithNeeds, filterJobsForEvent, sortJobsByNeeds } from "../core/plan.js";
-import { RunPreset, Workflow } from "../core/types.js";
+import { RunPlan, RunPreset, Workflow } from "../core/types.js";
 import { ActAdapter } from "../engines/act/actAdapter.js";
-import { EngineContext } from "../core/engine.js";
+import { EngineAdapter, EngineContext, EngineRunResult } from "../core/engine.js";
 import { loadConfig } from "../config/loadConfig.js";
 import { RunStore } from "../store/runStore.js";
+import { RunView } from "../tui/runView.js";
 
 type CliOptions = {
   command: "run";
@@ -187,10 +189,7 @@ export async function runCli(): Promise<void> {
 
   let result;
   if (isTty && !args.mentionJson) {
-    const runSpinner = spinner();
-    runSpinner.start(`Running ${planned.jobs.length} job(s) with act...`);
-    result = await adapter.run(planned, engineContext);
-    runSpinner.stop(`Finished with exit code ${result.exitCode}`);
+    result = await runWithInk(adapter, planned, engineContext, workflow, path.join(repoRoot, ".xci", "runs"));
     outro(`Logs: ${result.logsPath}`);
   } else {
     if (!args.mentionJson) {
@@ -524,6 +523,40 @@ async function runPreflightChecks(containerEngine: string, interactive: boolean)
   const actOk = await ensureActAvailable(interactive);
   const engineOk = await ensureEngineAvailable(containerEngine, interactive);
   return actOk && engineOk;
+}
+
+async function runWithInk(
+  adapter: EngineAdapter,
+  plan: RunPlan,
+  context: EngineContext,
+  workflow: Workflow,
+  runStoreBase: string
+): Promise<EngineRunResult> {
+  return new Promise((resolve) => {
+    let resolved = false;
+    const handleComplete = (result: EngineRunResult): void => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      resolve(result);
+    };
+
+    const { waitUntilExit, unmount } = render(
+      React.createElement(RunView, {
+        adapter,
+        context,
+        plan,
+        workflow,
+        runStoreBase,
+        onComplete: handleComplete
+      })
+    );
+
+    waitUntilExit().then(() => {
+      unmount();
+    });
+  });
 }
 
 async function checkCommand(command: string, args: string[], label: string): Promise<boolean> {

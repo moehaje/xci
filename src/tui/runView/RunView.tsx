@@ -60,6 +60,8 @@ export function RunView({
 	const [logError, setLogError] = useState<string | null>(null);
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
 	const running = useRef(false);
+	const runReadInFlight = useRef(false);
+	const logReadInFlight = useRef(false);
 
 	const appendOutput = useCallback((_chunk: string) => {}, []);
 
@@ -113,19 +115,26 @@ export function RunView({
 	useEffect(() => {
 		const runPath = path.join(runStoreBase, plan.runId, "run.json");
 		const interval = setInterval(() => {
-			if (!fs.existsSync(runPath)) {
+			if (runReadInFlight.current) {
 				return;
 			}
-			try {
-				const raw = fs.readFileSync(runPath, "utf-8");
-				const parsed = JSON.parse(raw) as RunRecord;
-				setRunRecord(parsed);
-				setReadError(null);
-			} catch (error) {
-				const message =
-					error instanceof Error ? error.message : "Unknown error";
-				setReadError(`Failed to read run record: ${message}`);
-			}
+			runReadInFlight.current = true;
+			void (async () => {
+				try {
+					const raw = await fs.promises.readFile(runPath, "utf-8");
+					const parsed = JSON.parse(raw) as RunRecord;
+					setRunRecord(parsed);
+					setReadError(null);
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : "Unknown error";
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+						setReadError(`Failed to read run record: ${message}`);
+					}
+				} finally {
+					runReadInFlight.current = false;
+				}
+			})();
 		}, POLL_INTERVAL_MS);
 
 		return () => clearInterval(interval);
@@ -148,20 +157,31 @@ export function RunView({
 		}
 		const logPath = path.join(runRecord.logDir, `${selectedJobRef.jobId}.log`);
 		const interval = setInterval(() => {
-			if (!fs.existsSync(logPath)) {
+			if (logReadInFlight.current) {
 				return;
 			}
-			try {
-				const raw = fs.readFileSync(logPath, "utf-8");
-				const parsed = parseStepData(selectedSteps, raw, selectedJobRef.status);
-				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
-				setStepOutputs(parsed.outputs);
-				setLogError(null);
-			} catch (error) {
-				const message =
-					error instanceof Error ? error.message : "Unknown error";
-				setLogError(`Failed to read logs: ${message}`);
-			}
+			logReadInFlight.current = true;
+			void (async () => {
+				try {
+					const raw = await fs.promises.readFile(logPath, "utf-8");
+					const parsed = parseStepData(
+						selectedSteps,
+						raw,
+						selectedJobRef.status,
+					);
+					setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
+					setStepOutputs(parsed.outputs);
+					setLogError(null);
+				} catch (error) {
+					const message =
+						error instanceof Error ? error.message : "Unknown error";
+					if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+						setLogError(`Failed to read logs: ${message}`);
+					}
+				} finally {
+					logReadInFlight.current = false;
+				}
+			})();
 		}, POLL_INTERVAL_MS);
 		return () => clearInterval(interval);
 	}, [runRecord?.logDir, selectedJobIndex, selectedSteps, orderedJobs]);

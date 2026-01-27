@@ -102,12 +102,16 @@ function buildActArgs(
   }
 
   if (context.artifactDir) {
-    args.push("--artifact-dir", context.artifactDir);
     args.push("--artifact-server-path", context.artifactDir);
+    args.push("--artifact-server-addr", "127.0.0.1");
+    args.push("--artifact-server-port", "0");
   }
 
   if (context.containerArchitecture) {
-    args.push("--container-architecture", context.containerArchitecture);
+    const arch = context.containerArchitecture.includes("/")
+      ? context.containerArchitecture
+      : `linux/${context.containerArchitecture}`;
+    args.push("--container-architecture", arch);
   }
 
   for (const [key, value] of Object.entries(context.platformMap ?? {})) {

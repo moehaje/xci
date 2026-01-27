@@ -82,13 +82,20 @@ export async function runCli(): Promise<void> {
     return;
   }
 
+  const supportedEvents = resolveSupportedEvents(workflow);
   if (isTty && !args.event) {
-    const event = await selectEvent(eventName);
+    const event = await selectEvent(eventName, supportedEvents);
     if (!event) {
       process.exitCode = 130;
       return;
     }
     eventName = event;
+  } else if (!supportedEvents.includes(eventName)) {
+    process.stderr.write(
+      `Event "${eventName}" is not enabled for this workflow. Use --event with one of: ${supportedEvents.join(", ")}.\n`
+    );
+    process.exitCode = 2;
+    return;
   }
 
   const availableJobs = filterJobsForEvent(workflow.jobs, eventName);
@@ -296,15 +303,11 @@ function resolvePresets(
   return resolved;
 }
 
-async function selectEvent(defaultEvent: string): Promise<string | null> {
+async function selectEvent(defaultEvent: string, events: string[]): Promise<string | null> {
   const selection = await select({
     message: "Select an event",
-    initialValue: defaultEvent,
-    options: [
-      { value: "push", label: "push" },
-      { value: "pull_request", label: "pull_request" },
-      { value: "workflow_dispatch", label: "workflow_dispatch" }
-    ]
+    initialValue: events.includes(defaultEvent) ? defaultEvent : events[0],
+    options: events.map((event) => ({ value: event, label: event }))
   });
   if (isCancel(selection)) {
     cancel("Canceled.");
@@ -422,6 +425,13 @@ function resolvePlatformMap(
   return {
     "ubuntu-latest": "ghcr.io/catthehacker/ubuntu:act-latest"
   };
+}
+
+function resolveSupportedEvents(workflow: Workflow): string[] {
+  if (workflow.events.length > 0) {
+    return workflow.events;
+  }
+  return ["push", "pull_request", "workflow_dispatch"];
 }
 
 async function runPreflightChecks(containerEngine: string, interactive: boolean): Promise<boolean> {

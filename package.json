@@ -1,0 +1,25 @@
+{
+  "name": "xci",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "xci": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "ink": "^4.4.1",
+    "react": "^18.2.0",
+    "yaml": "^2.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

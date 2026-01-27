@@ -2,6 +2,7 @@ import path from "node:path";
 import process from "node:process";
 import {
   cancel,
+  confirm,
   intro,
   isCancel,
   multiselect,
@@ -141,6 +142,8 @@ export async function runCli(): Promise<void> {
     matrixOverride: args.matrix ?? preset?.matrixOverride
   });
 
+  const platformMap = resolvePlatformMap(config.runtime.image, config.runtime.platformMap);
+
   const engineContext: EngineContext = {
     repoRoot,
     workflowsPath: path.dirname(workflow.path),
@@ -148,17 +151,14 @@ export async function runCli(): Promise<void> {
     eventPayloadPath: plan.event.payloadPath,
     artifactDir: path.join(repoRoot, ".xci", "runs", plan.runId, "artifacts"),
     containerArchitecture: config.runtime.architecture,
-    platformMap: {
-      ...config.runtime.image,
-      ...config.runtime.platformMap
-    },
+    platformMap,
     envFile: config.envFile,
     varsFile: config.varsFile,
     secretsFile: config.secretsFile,
     matrixOverride: plan.jobs[0]?.matrix ?? undefined
   };
 
-  const preflightOk = await runPreflightChecks(config.runtime.container);
+  const preflightOk = await runPreflightChecks(config.runtime.container, isTty && !args.mentionJson);
   if (!preflightOk) {
     process.exitCode = 1;
     return;
@@ -411,9 +411,22 @@ async function buildJsonSummary(
   };
 }
 
-async function runPreflightChecks(containerEngine: string): Promise<boolean> {
-  const actOk = await checkCommand("act", ["--version"], "act");
-  const engineOk = await checkCommand(containerEngine, ["info"], containerEngine);
+function resolvePlatformMap(
+  imageMap: Record<string, string>,
+  platformMap: Record<string, string>
+): Record<string, string> {
+  const merged = { ...imageMap, ...platformMap };
+  if (Object.keys(merged).length > 0) {
+    return merged;
+  }
+  return {
+    "ubuntu-latest": "ghcr.io/catthehacker/ubuntu:act-latest"
+  };
+}
+
+async function runPreflightChecks(containerEngine: string, interactive: boolean): Promise<boolean> {
+  const actOk = await ensureActAvailable(interactive);
+  const engineOk = await ensureEngineAvailable(containerEngine, interactive);
   return actOk && engineOk;
 }
 
@@ -425,4 +438,124 @@ async function checkCommand(command: string, args: string[], label: string): Pro
     return false;
   }
   return true;
+}
+
+async function ensureActAvailable(interactive: boolean): Promise<boolean> {
+  const ok = await checkCommand("act", ["--version"], "act");
+  if (ok || !interactive) {
+    return ok;
+  }
+  const shouldInstall = await confirm({
+    message: "act is not installed. Install it now?",
+    initialValue: true
+  });
+  if (isCancel(shouldInstall) || !shouldInstall) {
+    cancel("Canceled.");
+    return false;
+  }
+  const installed = await installAct();
+  if (!installed) {
+    process.stderr.write("Failed to install act. Install it manually and retry.\n");
+    return false;
+  }
+  return checkCommand("act", ["--version"], "act");
+}
+
+async function ensureEngineAvailable(engine: string, interactive: boolean): Promise<boolean> {
+  const ok = await checkCommand(engine, ["info"], engine);
+  if (ok || !interactive) {
+    return ok;
+  }
+  const shouldStart = await confirm({
+    message: `${engine} is not running. Start it now?`,
+    initialValue: true
+  });
+  if (isCancel(shouldStart) || !shouldStart) {
+    cancel("Canceled.");
+    return false;
+  }
+  const started = await startContainerEngine(engine);
+  if (!started) {
+    process.stderr.write(`Failed to start ${engine}. Please start it and retry.\n`);
+    return false;
+  }
+  return checkCommand(engine, ["info"], engine);
+}
+
+async function installAct(): Promise<boolean> {
+  const { spawnSync } = await import("node:child_process");
+  const platform = process.platform;
+  if (platform === "darwin") {
+    if (!(await commandExists("brew"))) {
+      process.stderr.write("Homebrew not found. Install Homebrew to install act.\n");
+      return false;
+    }
+    return spawnSync("brew", ["install", "act"], { stdio: "inherit" }).status === 0;
+  }
+
+  if (platform === "linux") {
+    if (await commandExists("apt-get")) {
+      if (spawnSync("sudo", ["apt-get", "update"], { stdio: "inherit" }).status !== 0) {
+        return false;
+      }
+      return spawnSync("sudo", ["apt-get", "install", "-y", "act"], { stdio: "inherit" }).status === 0;
+    }
+    if (await commandExists("dnf")) {
+      return spawnSync("sudo", ["dnf", "install", "-y", "act"], { stdio: "inherit" }).status === 0;
+    }
+    if (await commandExists("yum")) {
+      return spawnSync("sudo", ["yum", "install", "-y", "act"], { stdio: "inherit" }).status === 0;
+    }
+    if (await commandExists("pacman")) {
+      return spawnSync("sudo", ["pacman", "-S", "--noconfirm", "act"], { stdio: "inherit" }).status === 0;
+    }
+  }
+
+  if (platform === "win32") {
+    if (await commandExists("winget")) {
+      return spawnSync("winget", ["install", "--id", "nektos.act"], { stdio: "inherit" }).status === 0;
+    }
+    if (await commandExists("choco")) {
+      return spawnSync("choco", ["install", "act", "-y"], { stdio: "inherit" }).status === 0;
+    }
+  }
+
+  process.stderr.write("No supported package manager found for act installation.\n");
+  return false;
+}
+
+async function startContainerEngine(engine: string): Promise<boolean> {
+  const { spawnSync } = await import("node:child_process");
+  const platform = process.platform;
+
+  if (engine === "docker" && platform === "darwin") {
+    const openResult = spawnSync("open", ["-a", "Docker"], { stdio: "ignore" });
+    if (openResult.status !== 0) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    return true;
+  }
+
+  if (platform === "linux") {
+    if (await commandExists("systemctl")) {
+      const result = spawnSync("sudo", ["systemctl", "start", engine], { stdio: "inherit" });
+      return result.status === 0;
+    }
+  }
+
+  if (engine === "podman") {
+    if (await commandExists("podman")) {
+      const result = spawnSync("podman", ["machine", "start"], { stdio: "inherit" });
+      return result.status === 0;
+    }
+  }
+
+  return false;
+}
+
+async function commandExists(command: string): Promise<boolean> {
+  const { spawnSync } = await import("node:child_process");
+  const checker = process.platform === "win32" ? "where" : "which";
+  return spawnSync(checker, [command], { stdio: "ignore" }).status === 0;
 }

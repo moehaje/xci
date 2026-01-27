@@ -11,8 +11,8 @@ export function findWorkflowFiles(repoRoot: string): string[] {
 
   return fs
     .readdirSync(workflowsDir)
-    .filter((file) => file.endsWith(".yml") || file.endsWith(".yaml"))
-    .map((file) => path.join(workflowsDir, file));
+    .filter((file: string) => file.endsWith(".yml") || file.endsWith(".yaml"))
+    .map((file: string) => path.join(workflowsDir, file));
 }
 
 export function discoverWorkflows(repoRoot: string): Workflow[] {

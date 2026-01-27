@@ -176,7 +176,7 @@ function createRunRecord(plan: RunPlan, artifactDir: string, logDir: string): Ru
     jobs: [
       ...plan.jobs.map((job) => ({
         jobId: job.jobId,
-        status: "pending",
+        status: "pending" as const,
         matrix: job.matrix ?? null
       }))
     ],
@@ -223,7 +223,7 @@ function runAct(
     const [command, ...commandArgs] = args;
     const child = spawn(command, commandArgs, { cwd, env: process.env });
 
-    child.stdout.on("data", (chunk) => {
+    child.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       logStream.write(text);
       if (onOutput) {
@@ -233,7 +233,7 @@ function runAct(
       }
     });
 
-    child.stderr.on("data", (chunk) => {
+    child.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       logStream.write(text);
       if (onOutput) {
@@ -243,7 +243,7 @@ function runAct(
       }
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code: number | null) => {
       logStream.end();
       resolve(code ?? 1);
     });

@@ -87,7 +87,7 @@ export class ActAdapter implements EngineAdapter {
 function buildActArgs(
   context: EngineContext,
   jobId: string,
-  matrix: Record<string, unknown> | null
+  matrix: string[] | null
 ): string[] {
   const args = ["act", context.eventName, "--workflows", context.workflowsPath, "--job", jobId];
 
@@ -95,12 +95,15 @@ function buildActArgs(
     args.push("--eventpath", context.eventPayloadPath);
   }
 
-  if (matrix) {
-    args.push("--matrix", JSON.stringify(matrix));
+  if (matrix?.length) {
+    matrix.forEach((item) => {
+      args.push("--matrix", item);
+    });
   }
 
   if (context.artifactDir) {
     args.push("--artifact-dir", context.artifactDir);
+    args.push("--artifact-server-path", context.artifactDir);
   }
 
   if (context.containerArchitecture) {
@@ -113,6 +116,10 @@ function buildActArgs(
 
   if (context.envFile) {
     args.push("--env-file", context.envFile);
+  }
+
+  if (context.varsFile) {
+    args.push("--var-file", context.varsFile);
   }
 
   if (context.secretsFile) {

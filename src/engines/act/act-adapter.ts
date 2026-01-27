@@ -66,7 +66,7 @@ export class ActAdapter implements EngineAdapter {
       store.writeRun(runRecord);
 
       const logStream = fs.createWriteStream(logsPath, { flags: "a" });
-      exitCode = await runAct(engineArgs, context.repoRoot, logStream, context.onOutput);
+      exitCode = await runAct(engineArgs, context.repoRoot, logStream, job.jobId, context.onOutput);
 
       finalizeJobRun(jobRun, exitCode);
       store.writeRun(runRecord);
@@ -221,7 +221,8 @@ function runAct(
   args: string[],
   cwd: string,
   logStream: fs.WriteStream,
-  onOutput?: (chunk: string, source: "stdout" | "stderr") => void
+  jobId: string,
+  onOutput?: (chunk: string, source: "stdout" | "stderr", jobId?: string) => void
 ): Promise<number> {
   return new Promise((resolve) => {
     const [command, ...commandArgs] = args;
@@ -231,7 +232,7 @@ function runAct(
       const text = chunk.toString();
       logStream.write(text);
       if (onOutput) {
-        onOutput(text, "stdout");
+        onOutput(text, "stdout", jobId);
       } else {
         process.stdout.write(text);
       }
@@ -241,7 +242,7 @@ function runAct(
       const text = chunk.toString();
       logStream.write(text);
       if (onOutput) {
-        onOutput(text, "stderr");
+        onOutput(text, "stderr", jobId);
       } else {
         process.stderr.write(text);
       }

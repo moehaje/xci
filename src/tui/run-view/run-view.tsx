@@ -62,8 +62,8 @@ export function RunView({
 	const running = useRef(false);
 	const runReadInFlight = useRef(false);
 	const logReadInFlight = useRef(false);
-
-	const appendOutput = useCallback((_chunk: string) => {}, []);
+	const logBuffers = useRef(new Map<string, string>());
+	const liveOutputUsed = useRef(false);
 
 	const orderedJobs = useMemo(() => {
 		return plan.jobs.map((job) => {
@@ -87,6 +87,25 @@ export function RunView({
 	const selectedSteps = useMemo(
 		() => selectedJobModel?.steps ?? [],
 		[selectedJobModel],
+	);
+
+	const appendOutput = useCallback(
+		(chunk: string, _source: "stdout" | "stderr", jobId?: string) => {
+			if (!jobId) {
+				return;
+			}
+			liveOutputUsed.current = true;
+			const current = logBuffers.current.get(jobId) ?? "";
+			const next = current + chunk;
+			logBuffers.current.set(jobId, next);
+			if (jobId !== selectedJob?.jobId) {
+				return;
+			}
+			const parsed = parseStepData(selectedSteps, next, selectedJob.status);
+			setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
+			setStepOutputs(parsed.outputs);
+		},
+		[selectedJob?.jobId, selectedJob?.status, selectedSteps],
 	);
 
 	const diagramLines = useMemo(() => {
@@ -153,6 +172,19 @@ export function RunView({
 		}
 		const selectedJobRef = orderedJobs[selectedJobIndex];
 		if (!selectedJobRef) {
+			return;
+		}
+		if (liveOutputUsed.current) {
+			const buffer = logBuffers.current.get(selectedJobRef.jobId);
+			if (buffer) {
+				const parsed = parseStepData(
+					selectedSteps,
+					buffer,
+					selectedJobRef.status,
+				);
+				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
+				setStepOutputs(parsed.outputs);
+			}
 			return;
 		}
 		const logPath = path.join(runRecord.logDir, `${selectedJobRef.jobId}.log`);

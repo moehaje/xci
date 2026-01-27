@@ -84,16 +84,6 @@ export function parseStepData(
       continue;
     }
 
-    if (line.includes("Failed but continue next step")) {
-      if (lastFailureIndex !== null) {
-        const stepId = steps[lastFailureIndex]?.id;
-        if (stepId) {
-          statusMap[stepId] = "success";
-        }
-      }
-      continue;
-    }
-
     if (currentIndex !== null) {
       if (line.trim().length > 0) {
         const stepId = steps[currentIndex]?.id;

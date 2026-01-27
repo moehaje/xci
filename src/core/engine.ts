@@ -1,4 +1,4 @@
-import { RunPlan } from "./types.js";
+import type { RunPlan } from "./types.js";
 
 export type EngineCapabilities = {
   matrix: boolean;

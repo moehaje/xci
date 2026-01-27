@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseWorkflow } from "./parser.js";
-import { Workflow } from "./types.js";
+import type { Workflow } from "./types.js";
 
 export function findWorkflowFiles(repoRoot: string): string[] {
   const workflowsDir = path.join(repoRoot, ".github", "workflows");

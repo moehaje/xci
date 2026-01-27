@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { Job, RunPlan, RunPreset, Workflow } from "./types.js";
+import type { Job, RunPlan, RunPreset, Workflow } from "./types.js";
 
 export type PlanInput = {
   workflow: Workflow;

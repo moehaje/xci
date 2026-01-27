@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { RunRecord } from "../core/types.js";
+import type { RunRecord } from "../core/types.js";
 
 export class RunStore {
   constructor(private readonly baseDir: string) {}

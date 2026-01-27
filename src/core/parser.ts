@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
-import { Job, Step, Workflow } from "./types.js";
+import type { Job, Step, Workflow } from "./types.js";
 
 type WorkflowYaml = {
   name?: string;

@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { EngineAdapter, EngineCapabilities, EngineContext, EngineRunResult } from "../../core/engine.js";
-import { JobRun, RunPlan, RunRecord } from "../../core/types.js";
+import type { EngineAdapter, EngineCapabilities, EngineContext, EngineRunResult } from "../../core/engine.js";
+import type { JobRun, RunPlan, RunRecord } from "../../core/types.js";
 import { RunStore } from "../../store/runStore.js";
 
 export class ActAdapter implements EngineAdapter {

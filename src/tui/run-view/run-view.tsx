@@ -20,6 +20,7 @@ import {
 	POLL_INTERVAL_MS,
 	SPINNER_FRAMES,
 } from "./constants.js";
+import type { DiagramLine } from "./diagram.js";
 import { buildDiagramLines } from "./diagram.js";
 import { formatDuration } from "./format.js";
 import { mergeStepStatuses, parseStepData } from "./parser.js";
@@ -139,9 +140,11 @@ export function RunView({
 		[liveMode],
 	);
 
-	const diagramLines = useMemo(() => {
+	const diagramLines = useMemo<DiagramLine[]>(() => {
 		return buildDiagramLines(workflow, orderedJobs, spinnerIndex);
 	}, [orderedJobs, spinnerIndex, workflow]);
+	const statusColor = colorForStatus(statusText);
+	const statusDim = statusText === "pending";
 
 	useEffect(() => {
 		if (running.current) {
@@ -308,9 +311,9 @@ export function RunView({
 				<Text>
 					{workflow.name} · {plan.event.name} · {plan.runId}
 				</Text>
-        <Text dimColor>
-          {renderStatusGlyph(statusText, spinnerIndex)} {STATUS_LABELS[statusText]}
-        </Text>
+				<Text color={statusColor} dimColor={statusDim}>
+					{renderStatusGlyph(statusText, spinnerIndex)} {STATUS_LABELS[statusText]}
+				</Text>
 			</Box>
 
 			{viewMode === "summary" ? (
@@ -322,7 +325,17 @@ export function RunView({
 				>
 					<Text dimColor>Summary</Text>
 					{diagramLines.map((line, index) => (
-						<Text key={`${line}-${index}`}>{line}</Text>
+						<Text key={`diagram-line-${index}`}>
+							{line.segments.map((segment, segmentIndex) => (
+								<Text
+									key={`segment-${index}-${segmentIndex}`}
+									color={segment.color}
+									dimColor={segment.dim}
+								>
+									{segment.text}
+								</Text>
+							))}
+						</Text>
 					))}
 				</Box>
 			) : (

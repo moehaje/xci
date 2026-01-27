@@ -1,14 +1,31 @@
 import { RunStatus, Workflow } from "../../core/types.js";
 import { formatDuration } from "./format.js";
-import { formatStatusText } from "./status.js";
+import { colorForStatus, formatStatusText } from "./status.js";
+
+type DiagramColor = "green" | "red" | "yellow" | "gray" | undefined;
+
+type DiagramLabel = {
+  text: string;
+  color?: DiagramColor;
+};
+
+export type DiagramSegment = {
+  text: string;
+  color?: DiagramColor;
+  dim?: boolean;
+};
+
+export type DiagramLine = {
+  segments: DiagramSegment[];
+};
 
 export function buildDiagramLines(
   workflow: Workflow,
   jobs: { jobId: string; status: RunStatus; durationMs?: number }[],
   spinnerIndex: number
-): string[] {
+): DiagramLine[] {
   if (jobs.length === 0) {
-    return ["No jobs selected."];
+    return [{ segments: [{ text: "No jobs selected.", dim: true }] }];
   }
   const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
   const depths = new Map<string, number>();
@@ -32,28 +49,37 @@ export function buildDiagramLines(
 
   jobs.forEach((job) => resolveDepth(job.jobId));
   const maxDepth = Math.max(...Array.from(depths.values()), 0);
-  const columns: string[][] = Array.from({ length: maxDepth + 1 }, () => []);
+  const columns: DiagramLabel[][] = Array.from({ length: maxDepth + 1 }, () => []);
 
   jobs.forEach((job) => {
     const depth = depths.get(job.jobId) ?? 0;
     columns[depth].push(buildJobLabel(job, spinnerIndex));
   });
 
-  const columnWidths = columns.map((column) => Math.max(0, ...column.map((item) => item.length), 16));
+  const columnWidths = columns.map((column) =>
+    Math.max(0, ...column.map((item) => item.text.length), 16)
+  );
   const maxRows = Math.max(...columns.map((column) => column.length), 1);
 
-  const lines: string[] = [];
+  const lines: DiagramLine[] = [];
   for (let row = 0; row < maxRows; row += 1) {
-    let line = "";
+    const segments: DiagramSegment[] = [];
     for (let col = 0; col < columns.length; col += 1) {
-      const text = columns[col][row] ?? "";
+      const label = columns[col][row];
+      const text = label?.text ?? "";
+      if (label) {
+        segments.push({ text, color: label.color });
+      }
       const padded = padRight(text, columnWidths[col]);
-      line += padded;
+      if (padded.length > text.length) {
+        segments.push({ text: padded.slice(text.length) });
+      }
       if (col < columns.length - 1) {
-        line += "  ──→  ";
+        segments.push({ text: "  ──→  ", dim: true });
       }
     }
-    lines.push(line.trimEnd());
+    const trimmed = trimDiagramSegments(segments);
+    lines.push({ segments: trimmed });
   }
   return lines;
 }
@@ -61,10 +87,13 @@ export function buildDiagramLines(
 function buildJobLabel(
   job: { jobId: string; status: RunStatus; durationMs?: number },
   spinnerIndex: number
-): string {
+): DiagramLabel {
   const status = formatStatusText(job.status, spinnerIndex);
   const duration = job.durationMs ? ` ${formatDuration(job.durationMs)}` : "";
-  return `${status} ${job.jobId}${duration}`;
+  return {
+    text: `${status} ${job.jobId}${duration}`,
+    color: colorForStatus(job.status)
+  };
 }
 
 function padRight(value: string, length: number): string {
@@ -72,4 +101,25 @@ function padRight(value: string, length: number): string {
     return value;
   }
   return value + " ".repeat(length - value.length);
+}
+
+function trimDiagramSegments(segments: DiagramSegment[]): DiagramSegment[] {
+  if (segments.length === 0) {
+    return segments;
+  }
+  const trimmed = [...segments];
+  while (trimmed.length > 0) {
+    const last = trimmed[trimmed.length - 1];
+    const trimmedText = last.text.replace(/\s+$/g, "");
+    if (trimmedText.length === last.text.length) {
+      break;
+    }
+    if (trimmedText.length === 0) {
+      trimmed.pop();
+      continue;
+    }
+    trimmed[trimmed.length - 1] = { ...last, text: trimmedText };
+    break;
+  }
+  return trimmed;
 }

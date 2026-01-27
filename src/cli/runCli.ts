@@ -175,9 +175,13 @@ export async function runCli(): Promise<void> {
     runSpinner.stop(`Finished with exit code ${result.exitCode}`);
     outro(`Logs: ${result.logsPath}`);
   } else {
-    process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
+    if (!args.mentionJson) {
+      process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
+    }
     result = await adapter.run(planned, engineContext);
-    process.stdout.write(`Finished with exit code ${result.exitCode}\\n`);
+    if (!args.mentionJson) {
+      process.stdout.write(`Finished with exit code ${result.exitCode}\\n`);
+    }
     if (!args.mentionJson) {
       process.stdout.write(`Logs: ${result.logsPath}\\n`);
     }

@@ -42,8 +42,16 @@ async function ensureActAvailable(interactive: boolean): Promise<boolean> {
 }
 
 async function ensureEngineAvailable(engine: string, interactive: boolean): Promise<boolean> {
-	const ok = await checkCommand(engine, ["info"], engine);
+	const available = await commandExists(engine);
+	if (!available) {
+		process.stderr.write(`${engine} is not available. Install and retry.\n`);
+		return false;
+	}
+	const ok = await checkEngineInfo(engine);
 	if (ok || !interactive) {
+		if (!ok && !interactive) {
+			process.stderr.write(`${engine} is not running. Start it and retry.\n`);
+		}
 		return ok;
 	}
 	const shouldStart = await confirm({
@@ -59,7 +67,12 @@ async function ensureEngineAvailable(engine: string, interactive: boolean): Prom
 		process.stderr.write(`Failed to start ${engine}. Please start it and retry.\n`);
 		return false;
 	}
-	return checkCommand(engine, ["info"], engine);
+	const ready = await waitForEngine(engine);
+	if (!ready) {
+		process.stderr.write(`${engine} is still not running. Please retry in a moment.\n`);
+		return false;
+	}
+	return true;
 }
 
 async function installAct(): Promise<boolean> {
@@ -115,11 +128,10 @@ async function startContainerEngine(engine: string): Promise<boolean> {
 	const platform = process.platform;
 
 	if (engine === "docker" && platform === "darwin") {
-		const openResult = spawnSync("open", ["-a", "Docker"], { stdio: "ignore" });
+		const openResult = spawnSync("open", ["-g", "-a", "Docker"], { stdio: "ignore" });
 		if (openResult.status !== 0) {
 			return false;
 		}
-		await new Promise((resolve) => setTimeout(resolve, 2000));
 		return true;
 	}
 
@@ -137,6 +149,15 @@ async function startContainerEngine(engine: string): Promise<boolean> {
 		}
 	}
 
+	if (engine === "docker" && platform === "win32") {
+		const result = spawnSync(
+			"powershell.exe",
+			["-NoProfile", "-Command", "Start-Service com.docker.service"],
+			{ stdio: "ignore" },
+		);
+		return result.status === 0;
+	}
+
 	return false;
 }
 
@@ -144,4 +165,20 @@ async function commandExists(command: string): Promise<boolean> {
 	const { spawnSync } = await import("node:child_process");
 	const checker = process.platform === "win32" ? "where" : "which";
 	return spawnSync(checker, [command], { stdio: "ignore" }).status === 0;
+}
+
+async function checkEngineInfo(engine: string): Promise<boolean> {
+	const { spawnSync } = await import("node:child_process");
+	const result = spawnSync(engine, ["info"], { stdio: "ignore" });
+	return result.status === 0;
+}
+
+async function waitForEngine(engine: string): Promise<boolean> {
+	for (let attempt = 0; attempt < 8; attempt += 1) {
+		if (await checkEngineInfo(engine)) {
+			return true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+	}
+	return false;
 }

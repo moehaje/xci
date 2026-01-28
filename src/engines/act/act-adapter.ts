@@ -237,11 +237,30 @@ function runAct(
 		} else {
 			process.stdout.write(commandLine);
 		}
+		let dockerHinted = false;
+		const maybeHintDockerError = (text: string): void => {
+			if (dockerHinted) {
+				return;
+			}
+			if (!looksLikeDockerStorageError(text)) {
+				return;
+			}
+			dockerHinted = true;
+			const hint =
+				"XCI note: Docker reported a storage I/O error. Try restarting Docker Desktop and check disk space.\n";
+			logStream.write(hint);
+			if (onOutput) {
+				onOutput(hint, "stderr", jobId);
+			} else {
+				process.stderr.write(hint);
+			}
+		};
 		const child = spawn(command, commandArgs, { cwd, env: process.env });
 
 		child.stdout.on("data", (chunk: Buffer) => {
 			const text = chunk.toString();
 			logStream.write(text);
+			maybeHintDockerError(text);
 			if (onOutput) {
 				onOutput(text, "stdout", jobId);
 			} else {
@@ -252,6 +271,7 @@ function runAct(
 		child.stderr.on("data", (chunk: Buffer) => {
 			const text = chunk.toString();
 			logStream.write(text);
+			maybeHintDockerError(text);
 			if (onOutput) {
 				onOutput(text, "stderr", jobId);
 			} else {
@@ -298,4 +318,11 @@ function quoteArg(value: string): string {
 		return JSON.stringify(value);
 	}
 	return value;
+}
+
+function looksLikeDockerStorageError(text: string): boolean {
+	return (
+		text.includes("Error response from daemon") &&
+		(text.includes("input/output error") || text.includes("I/O error"))
+	);
 }

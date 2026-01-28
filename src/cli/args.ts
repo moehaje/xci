@@ -13,10 +13,11 @@ export type CliOptions = {
 	help?: boolean;
 	version?: boolean;
 	unknown?: string[];
+	errors?: string[];
 };
 
 export function parseArgs(argv: string[]): CliOptions {
-	const options: CliOptions = { command: "run", unknown: [] };
+	const options: CliOptions = { command: "run", unknown: [], errors: [] };
 	const args = [...argv];
 	if (args[0] && !args[0].startsWith("-")) {
 		options.command = "run";
@@ -35,25 +36,35 @@ export function parseArgs(argv: string[]): CliOptions {
 				options.version = true;
 				break;
 			case "--workflow":
-				options.workflow = args.shift();
+				options.workflow = takeValue("--workflow", args, options);
 				break;
 			case "--job":
-				options.jobs = (args.shift() ?? "").split(",").filter(Boolean);
+				{
+					const value = takeValue("--job", args, options);
+					if (value) {
+						options.jobs = value.split(",").filter(Boolean);
+					}
+				}
 				break;
 			case "--all":
 				options.all = true;
 				break;
 			case "--event":
-				options.event = args.shift();
+				options.event = takeValue("--event", args, options);
 				break;
 			case "--event-path":
-				options.eventPath = args.shift();
+				options.eventPath = takeValue("--event-path", args, options);
 				break;
 			case "--matrix":
-				options.matrix = collectMatrices(options.matrix, args.shift());
+				{
+					const value = takeValue("--matrix", args, options);
+					if (value) {
+						options.matrix = collectMatrices(options.matrix, value);
+					}
+				}
 				break;
 			case "--preset":
-				options.preset = args.shift();
+				options.preset = takeValue("--preset", args, options);
 				break;
 			case "--json":
 				options.json = true;
@@ -98,4 +109,16 @@ function collectMatrices(current: string[] | undefined, value?: string): string[
 		return current;
 	}
 	return [...(current ?? []), value];
+}
+
+function takeValue(flag: string, args: string[], options: CliOptions): string | undefined {
+	const value = args.shift();
+	if (!value || value.startsWith("-")) {
+		options.errors?.push(`Missing value for ${flag}`);
+		if (value) {
+			args.unshift(value);
+		}
+		return undefined;
+	}
+	return value;
 }

@@ -38,6 +38,12 @@ export async function runCli(): Promise<void> {
 		process.exitCode = 2;
 		return;
 	}
+	if (args.errors?.length) {
+		process.stderr.write(`${args.errors.join("\n")}\n`);
+		process.stderr.write("Run `xci --help` for usage.\n");
+		process.exitCode = 2;
+		return;
+	}
 	if (args.command !== "run") {
 		process.stderr.write("Only `xci run` is supported right now.\n");
 		process.exitCode = 2;

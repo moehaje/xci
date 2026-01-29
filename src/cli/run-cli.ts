@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { cancel, intro, isCancel, multiselect, outro, select, text } from "@clack/prompts";
@@ -20,6 +21,7 @@ import type { CliOptions } from "./args.js";
 import { parseArgs, printHelp, readPackageVersion } from "./args.js";
 import { prepareInputFiles } from "./inputs.js";
 import { runPreflightChecks } from "./preflight.js";
+import { ensureGitignore, runInit } from "./init.js";
 
 export async function runCli(): Promise<void> {
 	const args = parseArgs(process.argv.slice(2));
@@ -44,13 +46,24 @@ export async function runCli(): Promise<void> {
 		process.exitCode = 2;
 		return;
 	}
+	if (args.command === "init") {
+		runInit(process.cwd());
+		return;
+	}
 	if (args.command !== "run") {
-		process.stderr.write("Only `xci run` is supported right now.\n");
+		process.stderr.write(`Unknown command: ${args.command}\n`);
 		process.exitCode = 2;
 		return;
 	}
 
 	const repoRoot = process.cwd();
+	const isTty = Boolean(process.stdout.isTTY);
+	if (isTty && !fs.existsSync(path.join(repoRoot, ".xci"))) {
+		const gitignoreResult = ensureGitignore(repoRoot);
+		if (gitignoreResult === "added") {
+			process.stdout.write("Added '.xci' to .gitignore.\n");
+		}
+	}
 	let workflows: Workflow[] = [];
 	try {
 		workflows = discoverWorkflows(repoRoot);
@@ -67,7 +80,6 @@ export async function runCli(): Promise<void> {
 	}
 
 	const { config } = loadConfig(repoRoot);
-	const isTty = Boolean(process.stdout.isTTY);
 	let eventName = args.event ?? "push";
 
 	let workflow = resolveWorkflow(workflows, args.workflow);

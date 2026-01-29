@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 export type CliOptions = {
-	command: "run";
+	command: "run" | "init";
 	workflow?: string;
 	jobs?: string[];
 	all?: boolean;
@@ -20,7 +20,12 @@ export function parseArgs(argv: string[]): CliOptions {
 	const options: CliOptions = { command: "run", unknown: [], errors: [] };
 	const args = [...argv];
 	if (args[0] && !args[0].startsWith("-")) {
-		options.command = "run";
+		const command = args[0];
+		if (command === "run" || command === "init") {
+			options.command = command;
+		} else {
+			options.command = command as CliOptions["command"];
+		}
 		args.shift();
 	}
 
@@ -81,7 +86,10 @@ export function parseArgs(argv: string[]): CliOptions {
 }
 
 export function printHelp(): void {
-	process.stdout.write(`xci run [options]\n\n`);
+	process.stdout.write(`xci <command> [options]\n\n`);
+	process.stdout.write(`Commands:\n`);
+	process.stdout.write(`  run                  Run workflows (default)\n`);
+	process.stdout.write(`  init                 Add .xci to .gitignore\n\n`);
 	process.stdout.write(`Options:\n`);
 	process.stdout.write(`  --workflow <file>     Workflow file name or id\n`);
 	process.stdout.write(`  --job <ids>           Comma-separated job ids\n`);

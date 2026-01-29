@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## [0.1.1] - 2026-01-29
 
-- Initial development.
+### Added
+- Publishable CLI packaging and policies.
+- Biome linting and formatting.
+- Engine preflight improvements and CLI validation.
+
+### Changed
+- TUI run view enhancements with better status rendering.

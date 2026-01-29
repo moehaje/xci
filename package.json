@@ -1,6 +1,6 @@
 {
 	"name": "xci",
-	"version": "0.1.0",
+  "version": "0.1.1",
 	"description": "Local GitHub Actions runner UX powered by act.",
 	"license": "MIT",
 	"author": "Moe Haje <hello@moee.dev> (https://moee.dev)",
@@ -50,9 +50,10 @@
     "dev": "tsx src/index.ts",
     "format": "biome format --write .",
     "lint": "biome lint .",
-		"prepack": "npm run build",
-		"type-check": "tsc -p tsconfig.json --noEmit"
-	},
+    "prepare": "npm run build",
+    "prepack": "npm run build",
+    "type-check": "tsc -p tsconfig.json --noEmit"
+  },
 	"dependencies": {
 		"@clack/prompts": "^0.7.0",
 		"ink": "^4.4.1",

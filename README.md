@@ -19,7 +19,7 @@ XCI is a local GitHub Actions runner UX that delegates execution to an engine (v
 ## Install
 
 ```bash
-npm install --save-dev xci
+npm install --save-dev @artsnlabs/xci
 ```
 
 ## Usage

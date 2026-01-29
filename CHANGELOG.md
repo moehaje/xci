@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-01-29
+
+### Changed
+- Rename npm package to `@artsnlabs/xci`.
+- Add explicit ESM `exports.import` condition.
+
 ## [0.1.1] - 2026-01-29
 
 ### Added

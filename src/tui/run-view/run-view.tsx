@@ -33,6 +33,7 @@ type DetailsPane = "jobs" | "steps";
 const DETAILS_ROW_PADDING_X = 2;
 const DETAILS_JOB_ROW_WIDTH = 30;
 const DETAILS_STEP_ROW_WIDTH = 36;
+const DETAILS_VIEW_RESERVED_ROWS = 18;
 
 export function RunView({
 	adapter,
@@ -58,6 +59,7 @@ export function RunView({
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
 	const [liveMode, setLiveMode] = useState(false);
 	const [terminalWidth, setTerminalWidth] = useState<number>(stdout.columns ?? 120);
+	const [terminalHeight, setTerminalHeight] = useState<number>(stdout.rows ?? 40);
 	const running = useRef(false);
 	const runReadInFlight = useRef(false);
 	const logReadInFlight = useRef(false);
@@ -148,6 +150,10 @@ export function RunView({
 		const estimatedWidth = estimateSummaryGraphWidth(summaryGraph.stages.length);
 		return estimatedWidth > terminalWidth;
 	}, [summaryGraph.stages.length, terminalWidth]);
+	const maxDetailsLogLines = useMemo(() => {
+		const available = terminalHeight - DETAILS_VIEW_RESERVED_ROWS;
+		return Math.max(2, Math.min(LOG_TAIL_LINES, available));
+	}, [terminalHeight]);
 	const statusColor = colorForStatus(statusText);
 	const statusDim = statusText === "pending";
 
@@ -207,6 +213,7 @@ export function RunView({
 	useEffect(() => {
 		const handleResize = (): void => {
 			setTerminalWidth(stdout.columns ?? 120);
+			setTerminalHeight(stdout.rows ?? 40);
 		};
 		handleResize();
 		stdout.on("resize", handleResize);
@@ -306,10 +313,7 @@ export function RunView({
 			if ((input === " " || key.return) && focusedPane === "steps") {
 				const step = selectedSteps[selectedStepIndex];
 				if (step) {
-					setExpandedSteps((prev) => ({
-						...prev,
-						[step.id]: !prev[step.id],
-					}));
+					setExpandedSteps((prev) => (prev[step.id] ? {} : { [step.id]: true }));
 				}
 			}
 		}
@@ -425,11 +429,21 @@ export function RunView({
 														{stepOutput.length === 0 ? (
 															<Text dimColor>Waiting for output...</Text>
 														) : (
-															stepOutput.slice(-LOG_TAIL_LINES).map((line, lineIndex) => (
-																<Text key={`${step.id}-${lineIndex}`} dimColor>
-																	{line}
-																</Text>
-															))
+															<>
+																{stepOutput
+																	.slice(-maxDetailsLogLines)
+																	.map((line, lineIndex) => (
+																		<Text key={`${step.id}-${lineIndex}`} dimColor>
+																			{line}
+																		</Text>
+																	))}
+																{stepOutput.length > maxDetailsLogLines ? (
+																	<Text dimColor>
+																		… {stepOutput.length - maxDetailsLogLines} more
+																		line(s)
+																	</Text>
+																) : null}
+															</>
 														)}
 													</Box>
 												) : null}

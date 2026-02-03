@@ -4,10 +4,14 @@ import { cancel, confirm, isCancel } from "@clack/prompts";
 export async function runPreflightChecks(
 	containerEngine: string,
 	interactive: boolean,
+	requiredImages: string[] = [],
 ): Promise<boolean> {
 	const actOk = await ensureActAvailable(interactive);
 	const engineOk = await ensureEngineAvailable(containerEngine, interactive);
-	return actOk && engineOk;
+	if (!actOk || !engineOk) {
+		return false;
+	}
+	return ensureImagesAvailable(containerEngine, requiredImages, interactive);
 }
 
 async function checkCommand(command: string, args: string[], label: string): Promise<boolean> {
@@ -181,4 +185,66 @@ async function waitForEngine(engine: string): Promise<boolean> {
 		await new Promise((resolve) => setTimeout(resolve, 1000));
 	}
 	return false;
+}
+
+async function ensureImagesAvailable(
+	engine: string,
+	images: string[],
+	interactive: boolean,
+): Promise<boolean> {
+	const uniqueImages = Array.from(new Set(images.filter(Boolean)));
+	if (uniqueImages.length === 0) {
+		return true;
+	}
+
+	const missing: string[] = [];
+	for (const image of uniqueImages) {
+		const exists = await imageExists(engine, image);
+		if (!exists) {
+			missing.push(image);
+		}
+	}
+
+	if (missing.length === 0) {
+		return true;
+	}
+
+	if (!interactive) {
+		process.stderr.write(
+			`Container image(s) not found locally: ${missing.join(", ")}. ${engine} will try to pull them during run.\n`,
+		);
+		return true;
+	}
+
+	const shouldPull = await confirm({
+		message: `Missing container image(s): ${missing.join(", ")}. Pull now?`,
+		initialValue: true,
+	});
+	if (isCancel(shouldPull) || !shouldPull) {
+		cancel("Canceled.");
+		return false;
+	}
+
+	for (const image of missing) {
+		const pulled = await pullImage(engine, image);
+		if (!pulled) {
+			process.stderr.write(`Failed to pull ${image} with ${engine}. Install/pull it manually and retry.\n`);
+			return false;
+		}
+	}
+
+	return true;
+}
+
+async function imageExists(engine: string, image: string): Promise<boolean> {
+	const { spawnSync } = await import("node:child_process");
+	if (engine === "podman") {
+		return spawnSync("podman", ["image", "exists", image], { stdio: "ignore" }).status === 0;
+	}
+	return spawnSync(engine, ["image", "inspect", image], { stdio: "ignore" }).status === 0;
+}
+
+async function pullImage(engine: string, image: string): Promise<boolean> {
+	const { spawnSync } = await import("node:child_process");
+	return spawnSync(engine, ["pull", image], { stdio: "inherit" }).status === 0;
 }

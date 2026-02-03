@@ -147,7 +147,8 @@ export async function runCli(): Promise<void> {
 			return;
 		}
 
-		const matrixChoice = await promptMatrix();
+		const matrixKeys = collectMatrixKeys(workflow, jobChoice);
+		const matrixChoice = await promptMatrix(matrixKeys);
 		if (matrixChoice === null) {
 			process.exitCode = 130;
 			return;
@@ -183,7 +184,18 @@ export async function runCli(): Promise<void> {
 		return;
 	}
 
-	const platformMap = resolvePlatformMap(config.runtime.image, config.runtime.platformMap);
+	const platformResolution = resolvePlatformMap(
+		workflow,
+		ordered,
+		config.runtime.image,
+		config.runtime.platformMap,
+	);
+	const platformMap = platformResolution.map;
+	if (isTty && platformResolution.inferredLabels.length > 0) {
+		process.stdout.write(
+			`Auto-mapped runner labels to local container images: ${platformResolution.inferredLabels.join(", ")}\n`,
+		);
+	}
 
 	const engineContext: EngineContext = {
 		repoRoot,
@@ -191,7 +203,7 @@ export async function runCli(): Promise<void> {
 		eventName: plan.event.name,
 		eventPayloadPath: plan.event.payloadPath,
 		artifactDir: path.join(repoRoot, ".xci", "runs", plan.runId, "artifacts"),
-		containerArchitecture: config.runtime.architecture,
+		containerArchitecture: resolveContainerArchitecture(config.runtime.architecture),
 		platformMap,
 		envFile: inputFiles.envFile,
 		varsFile: inputFiles.varsFile,
@@ -199,7 +211,11 @@ export async function runCli(): Promise<void> {
 		matrixOverride: plan.jobs[0]?.matrix ?? undefined,
 	};
 
-	const preflightOk = await runPreflightChecks(config.runtime.container, isTty && !args.json);
+	const preflightOk = await runPreflightChecks(
+		config.runtime.container,
+		isTty && !args.json,
+		Object.values(platformMap),
+	);
 	if (!preflightOk) {
 		process.exitCode = 1;
 		return;
@@ -352,10 +368,16 @@ async function selectJobs(
 	return selection;
 }
 
-async function promptMatrix(): Promise<string[] | undefined | null> {
+async function promptMatrix(matrixKeys: string[]): Promise<string[] | undefined | null> {
+	const hasKeys = matrixKeys.length > 0;
+	const message = hasKeys
+		? `Matrix override (optional, format: key:value,key:value) [available keys: ${matrixKeys.join(", ")}]`
+		: "Matrix override (optional, format: key:value,key:value)";
 	const selection = await text({
-		message: "Matrix override (optional, format: key:value,key:value)",
-		placeholder: "node:20,os:ubuntu-latest",
+		message,
+		placeholder: hasKeys
+			? matrixKeys.map((key) => `${key}:<value>`).join(",")
+			: "key:value,key:value",
 	});
 	if (isCancel(selection)) {
 		cancel("Canceled.");
@@ -373,6 +395,26 @@ function parseMatrixInput(input: string): string[] | undefined {
 		.map((item) => item.trim())
 		.filter(Boolean);
 	return items.length > 0 ? items : undefined;
+}
+
+function collectMatrixKeys(workflow: Workflow, jobIds: string[]): string[] {
+	const keys = new Set<string>();
+	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
+
+	for (const jobId of jobIds) {
+		const matrix = jobMap.get(jobId)?.strategy?.matrix;
+		if (!matrix) {
+			continue;
+		}
+		for (const key of Object.keys(matrix)) {
+			if (key === "include" || key === "exclude") {
+				continue;
+			}
+			keys.add(key);
+		}
+	}
+
+	return Array.from(keys);
 }
 
 async function buildJsonSummary(
@@ -417,16 +459,83 @@ async function buildJsonSummary(
 }
 
 function resolvePlatformMap(
+	workflow: Workflow,
+	jobIds: string[],
 	imageMap: Record<string, string>,
 	platformMap: Record<string, string>,
-): Record<string, string> {
-	const merged = { ...imageMap, ...platformMap };
-	if (Object.keys(merged).length > 0) {
-		return merged;
+): { map: Record<string, string>; inferredLabels: string[] } {
+	const defaultImage = "ghcr.io/catthehacker/ubuntu:act-latest";
+	const inferred: Record<string, string> = {};
+	const inferredLabels: string[] = [];
+	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
+
+	for (const jobId of jobIds) {
+		const runsOn = jobMap.get(jobId)?.runsOn;
+		if (!runsOn) {
+			continue;
+		}
+		for (const label of parseRunsOnLabels(runsOn)) {
+			if (imageMap[label] || platformMap[label] || inferred[label]) {
+				continue;
+			}
+			if (!isSupportedRunnerLabel(label)) {
+				continue;
+			}
+			inferred[label] = defaultImage;
+			inferredLabels.push(label);
+		}
 	}
+
+	const merged = { ...inferred, ...imageMap, ...platformMap };
+	if (Object.keys(merged).length > 0) {
+		return { map: merged, inferredLabels };
+	}
+
 	return {
-		"ubuntu-latest": "ghcr.io/catthehacker/ubuntu:act-latest",
+		map: {
+			"ubuntu-latest": defaultImage,
+		},
+		inferredLabels: ["ubuntu-latest"],
 	};
+}
+
+function parseRunsOnLabels(runsOn: string): string[] {
+	return runsOn
+		.split(",")
+		.map((value) => value.trim())
+		.filter(Boolean);
+}
+
+function isSupportedRunnerLabel(label: string): boolean {
+	const value = label.toLowerCase();
+	if (value.startsWith("ubuntu-")) {
+		return true;
+	}
+	if (value.startsWith("macos-")) {
+		return true;
+	}
+	if (value.startsWith("windows-")) {
+		return true;
+	}
+	if (value === "ubuntu" || value === "linux" || value === "macos" || value === "windows") {
+		return true;
+	}
+	return value.startsWith("self-hosted");
+}
+
+function resolveContainerArchitecture(configured: string | undefined): string | undefined {
+	if (configured && configured !== "auto") {
+		return configured;
+	}
+
+	switch (process.arch) {
+		case "arm64":
+			return "arm64";
+		case "x64":
+			return "amd64";
+		default:
+			return undefined;
+	}
 }
 
 function resolveSupportedEvents(workflow: Workflow): string[] {

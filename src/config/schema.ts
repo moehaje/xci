@@ -16,13 +16,13 @@ export const ConfigSchema = z.object({
 	runtime: z
 		.object({
 			container: z.enum(["docker", "podman"]).default("docker"),
-			architecture: z.string().default("amd64"),
+			architecture: z.string().default("auto"),
 			image: z.record(z.string()).default({}),
 			platformMap: z.record(z.string()).default({}),
 		})
 		.default({
 			container: "docker",
-			architecture: "amd64",
+			architecture: "auto",
 			image: {},
 			platformMap: {},
 		}),

@@ -1,4 +1,4 @@
-import type { RunStatus } from "../../core/types.js";
+import type { RunStatus } from "../../../core/types.js";
 import { SPINNER_FRAMES } from "./constants.js";
 
 export const STATUS_LABELS: Record<RunStatus, string> = {

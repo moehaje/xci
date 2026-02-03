@@ -1,6 +1,6 @@
-import type { RunStatus, Workflow } from "../../core/types.js";
-import { formatDuration } from "./format.js";
-import { colorForStatus, formatStatusText } from "./status.js";
+import type { RunStatus, Workflow } from "../../../core/types.js";
+import { formatDuration } from "../utils/format.js";
+import { colorForStatus, formatStatusText } from "../utils/status.js";
 
 type DiagramColor = "green" | "red" | "yellow" | "gray" | undefined;
 

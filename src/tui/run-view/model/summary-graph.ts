@@ -1,4 +1,4 @@
-import type { RunStatus, Workflow } from "../../core/types.js";
+import type { RunStatus, Workflow } from "../../../core/types.js";
 
 export type JobStatusSnapshot = {
 	jobId: string;

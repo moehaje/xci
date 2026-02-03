@@ -1,4 +1,4 @@
-import type { Job, RunStatus } from "../../core/types.js";
+import type { Job, RunStatus } from "../../../core/types.js";
 import { MAX_LOG_LINES } from "./constants.js";
 
 export type StepParseResult = {

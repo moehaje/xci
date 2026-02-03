@@ -1,5 +1,5 @@
-import type { RunStatus } from "../../core/types.js";
-import type { Edge } from "./summary-graph.js";
+import type { RunStatus } from "../../../core/types.js";
+import type { Edge } from "../model/summary-graph.js";
 
 export type CanvasStyle = {
 	color?: "green" | "red" | "yellow" | "gray";

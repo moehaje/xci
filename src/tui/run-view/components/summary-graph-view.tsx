@@ -1,7 +1,8 @@
 import { Box, Text } from "ink";
-import type { RunStatus } from "../../core/types.js";
-import { formatDuration } from "./format.js";
-import { colorForStatus } from "./status.js";
+import type { RunStatus } from "../../../core/types.js";
+import type { CardNode, SummaryGraph } from "../model/summary-graph.js";
+import { formatDuration } from "../utils/format.js";
+import { colorForStatus } from "../utils/status.js";
 import {
 	type Canvas,
 	type CanvasStyle,
@@ -9,8 +10,7 @@ import {
 	createCanvas,
 	drawEdges,
 	drawPort,
-} from "./summary-connectors.js";
-import type { CardNode, SummaryGraph } from "./summary-graph.js";
+} from "../render/summary-connectors.js";
 
 const CARD_WIDTH = 34;
 const CARD_GAP_Y = 1;

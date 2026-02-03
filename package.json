@@ -1,6 +1,6 @@
 {
 	"name": "@artsnlabs/xci",
-	"version": "0.1.4",
+	"version": "0.1.5",
 	"description": "Local GitHub Actions runner UX powered by act.",
 	"license": "MIT",
 	"author": "Moe Haje <hello@moee.dev> (https://moee.dev)",

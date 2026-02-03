@@ -41,4 +41,7 @@ To prepare Homebrew formula updates for `xci`, use:
 npm run release:homebrew-metadata
 ```
 
+Tap updates are automated on GitHub Release publish via
+`.github/workflows/update-homebrew-tap.yml`.
+
 See `docs/homebrew-core.md` for the tap-now/core-later release flow.

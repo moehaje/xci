@@ -1,15 +1,23 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Box, Text, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter, EngineContext, EngineRunResult } from "../../core/engine.js";
 import type { Job, RunPlan, RunRecord, RunStatus, Workflow } from "../../core/types.js";
-import { DEFAULT_VIEW, LOG_TAIL_LINES, POLL_INTERVAL_MS, SPINNER_FRAMES } from "./constants.js";
+import {
+	DEFAULT_VIEW,
+	LOG_TAIL_LINES,
+	POLL_INTERVAL_MS,
+	SPINNER_FRAMES,
+	SUMMARY_GRAPH_MIN_WIDTH,
+} from "./constants.js";
 import type { DiagramLine } from "./diagram.js";
 import { buildDiagramLines } from "./diagram.js";
 import { formatDuration } from "./format.js";
 import { mergeStepStatuses, parseStepData } from "./parser.js";
 import { colorForStatus, renderStatusGlyph, STATUS_LABELS } from "./status.js";
+import { buildSummaryGraph } from "./summary-graph.js";
+import { estimateSummaryGraphWidth, SummaryGraphView } from "./summary-graph-view.js";
 
 export type RunViewProps = {
 	adapter: EngineAdapter;
@@ -21,6 +29,10 @@ export type RunViewProps = {
 };
 
 type ViewMode = "summary" | "details";
+type DetailsPane = "jobs" | "steps";
+const DETAILS_ROW_PADDING_X = 2;
+const DETAILS_JOB_ROW_WIDTH = 30;
+const DETAILS_STEP_ROW_WIDTH = 36;
 
 export function RunView({
 	adapter,
@@ -31,18 +43,21 @@ export function RunView({
 	onComplete,
 }: RunViewProps): JSX.Element {
 	const { exit } = useApp();
+	const { stdout } = useStdout();
 	const [runRecord, setRunRecord] = useState<RunRecord | null>(null);
 	const [statusText, setStatusText] = useState<RunStatus>("pending");
 	const [readError, setReadError] = useState<string | null>(null);
 	const [viewMode, setViewMode] = useState<ViewMode>(DEFAULT_VIEW);
 	const [selectedJobIndex, setSelectedJobIndex] = useState(0);
 	const [selectedStepIndex, setSelectedStepIndex] = useState(0);
+	const [focusedPane, setFocusedPane] = useState<DetailsPane>("jobs");
 	const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
 	const [stepOutputs, setStepOutputs] = useState<Record<string, string[]>>({});
 	const [stepStatuses, setStepStatuses] = useState<Record<string, RunStatus>>({});
 	const [logError, setLogError] = useState<string | null>(null);
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
 	const [liveMode, setLiveMode] = useState(false);
+	const [terminalWidth, setTerminalWidth] = useState<number>(stdout.columns ?? 120);
 	const running = useRef(false);
 	const runReadInFlight = useRef(false);
 	const logReadInFlight = useRef(false);
@@ -75,6 +90,15 @@ export function RunView({
 		selectedJobRef.current = selectedJob ?? undefined;
 		selectedStepsRef.current = selectedSteps;
 	}, [selectedJob, selectedSteps]);
+
+	useEffect(() => {
+		setSelectedStepIndex((prev) => {
+			if (selectedSteps.length === 0) {
+				return 0;
+			}
+			return Math.min(prev, selectedSteps.length - 1);
+		});
+	}, [selectedSteps.length]);
 
 	const appendOutput = useCallback(
 		(chunk: string, _source: "stdout" | "stderr", jobId?: string) => {
@@ -113,6 +137,17 @@ export function RunView({
 	const diagramLines = useMemo<DiagramLine[]>(() => {
 		return buildDiagramLines(workflow, orderedJobs, spinnerIndex);
 	}, [orderedJobs, spinnerIndex, workflow]);
+	const summaryGraph = useMemo(
+		() => buildSummaryGraph(workflow, orderedJobs),
+		[orderedJobs, workflow],
+	);
+	const shouldUseSummaryFallback = useMemo(() => {
+		if (terminalWidth < SUMMARY_GRAPH_MIN_WIDTH) {
+			return true;
+		}
+		const estimatedWidth = estimateSummaryGraphWidth(summaryGraph.stages.length);
+		return estimatedWidth > terminalWidth;
+	}, [summaryGraph.stages.length, terminalWidth]);
 	const statusColor = colorForStatus(statusText);
 	const statusDim = statusText === "pending";
 
@@ -165,9 +200,20 @@ export function RunView({
 	useEffect(() => {
 		const interval = setInterval(() => {
 			setSpinnerIndex((prev) => (prev + 1) % SPINNER_FRAMES.length);
-		}, 120);
+		}, 140);
 		return () => clearInterval(interval);
 	}, []);
+
+	useEffect(() => {
+		const handleResize = (): void => {
+			setTerminalWidth(stdout.columns ?? 120);
+		};
+		handleResize();
+		stdout.on("resize", handleResize);
+		return () => {
+			stdout.off("resize", handleResize);
+		};
+	}, [stdout]);
 
 	useEffect(() => {
 		if (!runRecord?.logDir) {
@@ -232,24 +278,32 @@ export function RunView({
 
 		if (viewMode === "details") {
 			if (key.leftArrow) {
-				setSelectedJobIndex((prev) => Math.max(0, prev - 1));
-				setSelectedStepIndex(0);
+				setFocusedPane("jobs");
 				return;
 			}
 			if (key.rightArrow) {
-				setSelectedJobIndex((prev) => Math.min(orderedJobs.length - 1, prev + 1));
-				setSelectedStepIndex(0);
+				setFocusedPane("steps");
 				return;
 			}
 			if (key.upArrow) {
-				setSelectedStepIndex((prev) => Math.max(0, prev - 1));
+				if (focusedPane === "jobs") {
+					setSelectedJobIndex((prev) => Math.max(0, prev - 1));
+					setSelectedStepIndex(0);
+				} else {
+					setSelectedStepIndex((prev) => Math.max(0, prev - 1));
+				}
 				return;
 			}
 			if (key.downArrow) {
-				setSelectedStepIndex((prev) => Math.min(selectedSteps.length - 1, prev + 1));
+				if (focusedPane === "jobs") {
+					setSelectedJobIndex((prev) => Math.min(orderedJobs.length - 1, prev + 1));
+					setSelectedStepIndex(0);
+				} else {
+					setSelectedStepIndex((prev) => Math.min(selectedSteps.length - 1, prev + 1));
+				}
 				return;
 			}
-			if (input === " " || key.return) {
+			if ((input === " " || key.return) && focusedPane === "steps") {
 				const step = selectedSteps[selectedStepIndex];
 				if (step) {
 					setExpandedSteps((prev) => ({
@@ -273,86 +327,117 @@ export function RunView({
 			</Box>
 
 			{viewMode === "summary" ? (
-				<Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
-					<Text dimColor>Summary</Text>
-					{diagramLines.map((line) => (
-						<Text key={line.id}>
-							{line.segments.map((segment) => (
-								<Text
-									key={segment.id}
-									color={segment.color}
-									dimColor={segment.dim}
-								>
-									{segment.text}
+				shouldUseSummaryFallback ? (
+					<Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1}>
+						<Text dimColor>Summary</Text>
+						{diagramLines.map((line) => (
+							<Text key={line.id}>
+								{line.segments.map((segment) => (
+									<Text key={segment.id} color={segment.color} dimColor={segment.dim}>
+										{segment.text}
+									</Text>
+								))}
+							</Text>
+						))}
+					</Box>
+				) : (
+					<SummaryGraphView graph={summaryGraph} spinnerIndex={spinnerIndex} />
+				)
+			) : (
+				<Box flexDirection="column">
+					<Box flexDirection="row">
+						<Box flexDirection="column" width={34}>
+							<Text dimColor>Jobs {focusedPane === "jobs" ? "•" : ""}</Text>
+							{orderedJobs.map((job, index) => {
+								const isSelected = index === selectedJobIndex;
+								const glyph = renderStatusGlyph(job.status, spinnerIndex);
+								const rowText = formatDetailsRow(
+									`${glyph} ${job.jobId}`,
+									DETAILS_JOB_ROW_WIDTH,
+									DETAILS_ROW_PADDING_X,
+								);
+								return (
+									<Text
+										key={job.jobId}
+										color={colorForStatus(job.status)}
+										backgroundColor={isSelected ? "gray" : undefined}
+										bold={isSelected && focusedPane === "jobs"}
+										dimColor={isSelected && focusedPane !== "jobs"}
+									>
+										{rowText}
+									</Text>
+								);
+							})}
+						</Box>
+						<Box flexDirection="column">
+							<Text dimColor>│</Text>
+							{Array.from(
+								{
+									length: Math.max(
+										orderedJobs.length,
+										selectedSteps.length + (selectedSteps.length === 0 ? 4 : 3),
+									),
+								},
+								(_, rowIndex) => `divider-${rowIndex + 1}`,
+							).map((dividerKey) => (
+								<Text key={dividerKey} dimColor>
+									│
 								</Text>
 							))}
-						</Text>
-					))}
-				</Box>
-			) : (
-				<Box flexDirection="row" gap={2}>
-					<Box flexDirection="column" width={28} borderStyle="round" paddingX={1} paddingY={1}>
-						<Text dimColor>Jobs</Text>
-						{orderedJobs.map((job, index) => {
-							const isSelected = index === selectedJobIndex;
-							const glyph = renderStatusGlyph(job.status, spinnerIndex);
-							return (
-								<Text
-									key={job.jobId}
-									color={colorForStatus(job.status)}
-									backgroundColor={isSelected ? "gray" : undefined}
-									bold={isSelected}
-								>
-									{glyph} {job.jobId}
+						</Box>
+						<Box flexDirection="column" marginLeft={1} flexGrow={1}>
+							<Text dimColor>Steps {focusedPane === "steps" ? "•" : ""}</Text>
+							<Text>{selectedJob?.jobId ?? "No job selected"}</Text>
+							{selectedJob ? (
+								<Text dimColor>
+									{STATUS_LABELS[selectedJob.status]}{" "}
+									{selectedJob.durationMs ? `· ${formatDuration(selectedJob.durationMs)}` : ""}
 								</Text>
-							);
-						})}
-					</Box>
-					<Box flexDirection="column" flexGrow={1} borderStyle="round" paddingX={2} paddingY={1}>
-						<Text>{selectedJob?.jobId ?? "No job selected"}</Text>
-						{selectedJob ? (
-							<Text dimColor>
-								{STATUS_LABELS[selectedJob.status]}{" "}
-								{selectedJob.durationMs ? `· ${formatDuration(selectedJob.durationMs)}` : ""}
-							</Text>
-						) : null}
-						<Box flexDirection="column" marginTop={1}>
-							{selectedSteps.length === 0 ? (
-								<Text dimColor>No steps found.</Text>
-							) : (
-								selectedSteps.map((step, index) => {
-									const isSelected = index === selectedStepIndex;
-									const isExpanded = Boolean(expandedSteps[step.id]);
-									const stepStatus = stepStatuses[step.id] ?? "pending";
-									const stepOutput = stepOutputs[step.id] ?? [];
-									const caret = isExpanded ? "▾" : "▸";
-									const glyph = renderStatusGlyph(stepStatus, spinnerIndex);
-									return (
-										<Box flexDirection="column" key={step.id}>
-											<Text
-												color={colorForStatus(stepStatus)}
-												backgroundColor={isSelected ? "gray" : undefined}
-												bold={isSelected}
-											>
-												{glyph} {caret} {step.name}
-											</Text>
-											{isExpanded ? (
-												<Box flexDirection="column" paddingLeft={2}>
-													{stepOutput.length === 0 ? (
-														<Text dimColor>Waiting for output...</Text>
-													) : (
-														stepOutput.slice(-LOG_TAIL_LINES).map((line, lineIndex) => (
-															<Text key={`${step.id}-${lineIndex}`} dimColor>
-																{line}
-															</Text>
-														))
-													)}
-												</Box>
-											) : null}
-										</Box>
-									);
-								})
-							)}
+							) : null}
+							<Box flexDirection="column" marginTop={1}>
+								{selectedSteps.length === 0 ? (
+									<Text dimColor>No steps found.</Text>
+								) : (
+									selectedSteps.map((step, index) => {
+										const isSelected = index === selectedStepIndex;
+										const isExpanded = Boolean(expandedSteps[step.id]);
+										const stepStatus = stepStatuses[step.id] ?? "pending";
+										const stepOutput = stepOutputs[step.id] ?? [];
+										const caret = isExpanded ? "▾" : "▸";
+										const glyph = renderStatusGlyph(stepStatus, spinnerIndex);
+										const rowText = formatDetailsRow(
+											`${glyph} ${caret} ${step.name}`,
+											DETAILS_STEP_ROW_WIDTH,
+											DETAILS_ROW_PADDING_X,
+										);
+										return (
+											<Box flexDirection="column" key={step.id}>
+												<Text
+													color={colorForStatus(stepStatus)}
+													backgroundColor={isSelected ? "gray" : undefined}
+													bold={isSelected && focusedPane === "steps"}
+													dimColor={isSelected && focusedPane !== "steps"}
+												>
+													{rowText}
+												</Text>
+												{isExpanded ? (
+													<Box flexDirection="column" paddingLeft={2}>
+														{stepOutput.length === 0 ? (
+															<Text dimColor>Waiting for output...</Text>
+														) : (
+															stepOutput.slice(-LOG_TAIL_LINES).map((line, lineIndex) => (
+																<Text key={`${step.id}-${lineIndex}`} dimColor>
+																	{line}
+																</Text>
+															))
+														)}
+													</Box>
+												) : null}
+											</Box>
+										);
+									})
+								)}
+							</Box>
 						</Box>
 					</Box>
 				</Box>
@@ -360,8 +445,8 @@ export function RunView({
 
 			<Box marginTop={1}>
 				<Text dimColor>
-					Tab: switch view · S: summary · D: details · Arrows: navigate · Space/Enter: toggle · Q:
-					exit
+					Tab: switch view · S: summary · D: details · Left/Right: focus pane · Up/Down: move ·
+					Space/Enter: toggle step · Q: exit
 				</Text>
 			</Box>
 			{statusText !== "running" ? (
@@ -381,4 +466,15 @@ export function RunView({
 			) : null}
 		</Box>
 	);
+}
+
+function formatDetailsRow(value: string, width: number, paddingX: number): string {
+	const innerWidth = Math.max(0, width - paddingX * 2);
+	const clipped =
+		value.length <= innerWidth
+			? value
+			: innerWidth > 1
+				? `${value.slice(0, innerWidth - 1)}…`
+				: value.slice(0, innerWidth);
+	return `${" ".repeat(paddingX)}${clipped.padEnd(innerWidth, " ")}${" ".repeat(paddingX)}`;
 }

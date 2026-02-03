@@ -22,6 +22,23 @@ XCI is a local GitHub Actions runner UX that delegates execution to an engine (v
 npm install --save-dev @artsnlabs/xci
 ```
 
+Homebrew (tap, available now):
+
+```bash
+brew tap moehaje/tap
+brew install xci
+```
+
+Tap installs `xci` with `act`; Docker or Podman still needs to be running.
+
+Homebrew one-command install:
+
+```bash
+brew install moehaje/tap/xci
+```
+
+For release/update flow, see `docs/homebrew-core.md`.
+
 ## Usage
 
 ```bash

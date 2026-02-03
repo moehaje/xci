@@ -32,3 +32,13 @@ Run type checking before opening a PR:
 ```bash
 npm run type-check
 ```
+
+## Homebrew Releases
+
+To prepare Homebrew formula updates for `xci`, use:
+
+```bash
+npm run release:homebrew-metadata
+```
+
+See `docs/homebrew-core.md` for the tap-now/core-later release flow.

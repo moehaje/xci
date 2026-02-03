@@ -32,7 +32,7 @@ export function parseStepData(
 	let currentIndex: number | null = null;
 	const lines = raw.split(/\r?\n/).map(stripAnsi);
 	for (const line of lines) {
-		const startMatch = line.match(/⭐\s+Run\s+(.+)$/);
+		const startMatch = line.match(/(?:⭐\s+Run|▾\s+Run)\s+(.+)$/);
 		if (startMatch) {
 			const key = normalizeStepName(startMatch[1]);
 			const index = resolveIndex(key, nameToIndices, nameToCursor, lastIndexForName);
@@ -48,7 +48,7 @@ export function parseStepData(
 			continue;
 		}
 
-		const successMatch = line.match(/✅\s+Success\s+-\s+(.+)$/);
+		const successMatch = line.match(/(?:✅\s+Success\s+-|✓)\s+(.+)$/);
 		if (successMatch) {
 			const key = normalizeStepName(successMatch[1]);
 			const index =
@@ -66,7 +66,7 @@ export function parseStepData(
 			continue;
 		}
 
-		const failureMatch = line.match(/❌\s+Failure\s+-\s+(.+)$/);
+		const failureMatch = line.match(/(?:❌\s+Failure\s+-|✗)\s+(.+)$/);
 		if (failureMatch) {
 			const key = normalizeStepName(failureMatch[1]);
 			const index =

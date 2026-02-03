@@ -230,6 +230,7 @@ function runAct(
 ): Promise<number> {
 	return new Promise((resolve) => {
 		const [command, ...commandArgs] = args;
+		const formatter = createActOutputFormatter();
 		const commandLine = `$ ${formatActCommand(args)}\n`;
 		logStream.write(commandLine);
 		if (onOutput) {
@@ -262,7 +263,10 @@ function runAct(
 			logStream.write(text);
 			maybeHintDockerError(text);
 			if (onOutput) {
-				onOutput(text, "stdout", jobId);
+				const formatted = formatter.push(text);
+				if (formatted.length > 0) {
+					onOutput(formatted, "stdout", jobId);
+				}
 			} else {
 				process.stdout.write(text);
 			}
@@ -273,13 +277,22 @@ function runAct(
 			logStream.write(text);
 			maybeHintDockerError(text);
 			if (onOutput) {
-				onOutput(text, "stderr", jobId);
+				const formatted = formatter.push(text);
+				if (formatted.length > 0) {
+					onOutput(formatted, "stderr", jobId);
+				}
 			} else {
 				process.stderr.write(text);
 			}
 		});
 
 		child.on("close", (code: number | null) => {
+			if (onOutput) {
+				const remaining = formatter.flush();
+				if (remaining.length > 0) {
+					onOutput(remaining, "stdout", jobId);
+				}
+			}
 			logStream.end();
 			resolve(code ?? 1);
 		});
@@ -325,4 +338,138 @@ function looksLikeDockerStorageError(text: string): boolean {
 		text.includes("Error response from daemon") &&
 		(text.includes("input/output error") || text.includes("I/O error"))
 	);
+}
+
+type ActOutputFormatter = {
+	push: (chunk: string) => string;
+	flush: () => string;
+};
+
+function createActOutputFormatter(): ActOutputFormatter {
+	let buffer = "";
+	let inGroup = false;
+	let inWithBlock = false;
+
+	const formatLine = (input: string): string | null => {
+		const line = stripAnsi(input).replace(/\r/g, "");
+		const body = stripActJobPrefix(line).trimStart();
+		if (body.length === 0) {
+			inWithBlock = false;
+			return null;
+		}
+
+		if (body.includes("::endgroup::")) {
+			inGroup = false;
+			inWithBlock = false;
+			return null;
+		}
+
+		const groupMatch = body.match(/^(?:❓\s+)?::group::\s*(.+)$/);
+		if (groupMatch) {
+			inGroup = true;
+			inWithBlock = false;
+			return `▾ ${groupMatch[1].trim()}`;
+		}
+
+		if (shouldSuppressActLine(body)) {
+			return null;
+		}
+
+		let content = body;
+		const pipeMatch = content.match(/^\|\s?(.*)$/);
+		if (pipeMatch) {
+			content = pipeMatch[1];
+		} else {
+			content = content.replace(/^❓\s+/, "");
+		}
+
+		const runMatch = content.match(/^⭐\s+Run\s+(.+)$/);
+		if (runMatch) {
+			inWithBlock = false;
+			content = `▾ Run ${runMatch[1].trim()}`;
+		}
+
+		const successMatch = content.match(/^✅\s+Success\s+-\s+(.+)$/);
+		if (successMatch) {
+			inWithBlock = false;
+			content = `✓ ${successMatch[1].trim()}`;
+		}
+
+		const failureMatch = content.match(/^❌\s+Failure\s+-\s+(.+)$/);
+		if (failureMatch) {
+			inWithBlock = false;
+			content = `✗ ${failureMatch[1].trim()}`;
+		}
+
+		if (content === "with:") {
+			inWithBlock = true;
+			return `   ${content}`;
+		}
+
+		const isWithKeyValue = /^[a-zA-Z0-9_.-]+:\s+.+$/.test(content);
+		if (inWithBlock && isWithKeyValue) {
+			return `     ${content}`;
+		}
+		if (inWithBlock && !isWithKeyValue) {
+			inWithBlock = false;
+		}
+
+		if (inGroup) {
+			return `   ${content}`;
+		}
+		return content;
+	};
+
+	const collect = (input: string, flushRemainder: boolean): string => {
+		buffer += input;
+		const lines = buffer.split("\n");
+		const remainder = lines.pop() ?? "";
+		if (!flushRemainder) {
+			buffer = remainder;
+		} else {
+			buffer = "";
+		}
+
+		const formatted: string[] = [];
+		for (const line of lines) {
+			const value = formatLine(line);
+			if (value) {
+				formatted.push(value);
+			}
+		}
+		if (flushRemainder && remainder.length > 0) {
+			const value = formatLine(remainder);
+			if (value) {
+				formatted.push(value);
+			}
+		}
+		if (formatted.length === 0) {
+			return "";
+		}
+		return `${formatted.join("\n")}\n`;
+	};
+
+	return {
+		push: (chunk: string) => collect(chunk, false),
+		flush: () => collect("", true),
+	};
+}
+
+function shouldSuppressActLine(line: string): boolean {
+	return (
+		line.startsWith("🐳") ||
+		/\bdocker\s+(cp|exec|run|pull)\b/.test(line) ||
+		/^(?:❓\s+)?(?:add|remove)-matcher\s+/i.test(line)
+	);
+}
+
+function stripActJobPrefix(line: string): string {
+	return line.replace(/^\[[^\]]+\]\s+/, "");
+}
+
+const ESCAPE = String.fromCharCode(27);
+const ANSI_PATTERN = new RegExp(`${ESCAPE}\\[[0-9;]*m`, "g");
+
+function stripAnsi(input: string): string {
+	return input.replace(ANSI_PATTERN, "");
 }

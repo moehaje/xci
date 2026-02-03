@@ -226,6 +226,23 @@ export async function runCli(): Promise<void> {
 		secretsFile: inputFiles.secretsFile,
 		matrixOverride: plan.jobs[0]?.matrix ?? undefined,
 	};
+	const runContext: EngineContext = args.json
+		? {
+				...engineContext,
+				onOutput: () => {},
+			}
+		: !isTty
+			? {
+					...engineContext,
+					onOutput: (chunk, source) => {
+						if (source === "stderr") {
+							process.stderr.write(chunk);
+							return;
+						}
+						process.stdout.write(chunk);
+					},
+				}
+			: engineContext;
 
 	const preflightOk = await runPreflightChecks(
 		config.runtime.container,
@@ -238,14 +255,14 @@ export async function runCli(): Promise<void> {
 	}
 
 	const adapter = new ActAdapter();
-	const planned = await adapter.plan(engineContext, plan);
+	const planned = await adapter.plan(runContext, plan);
 
 	let result: EngineRunResult | null = null;
 	if (isTty && !args.json) {
 		result = await runWithInk(
 			adapter,
 			planned,
-			engineContext,
+			runContext,
 			workflow,
 			path.join(repoRoot, ".xci", "runs"),
 		);
@@ -254,7 +271,7 @@ export async function runCli(): Promise<void> {
 		if (!args.json) {
 			process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
 		}
-		result = await adapter.run(planned, engineContext);
+		result = await adapter.run(planned, runContext);
 		if (!args.json) {
 			process.stdout.write(`Finished with exit code ${result.exitCode}\\n`);
 		}

@@ -24,3 +24,11 @@ jobs:
         run: npm run lint
       - name: Type check
         run: npm run type-check
+      - name: Packed CLI smoke test
+        run: |
+          TARBALL="$(npm pack --silent)"
+          PREFIX="$(mktemp -d)"
+          npm install --prefix "$PREFIX" "$TARBALL"
+          "$PREFIX/node_modules/.bin/xci" --version
+          "$PREFIX/node_modules/.bin/xci" --help | grep -q "run"
+          rm -f "$TARBALL"

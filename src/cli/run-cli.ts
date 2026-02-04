@@ -19,7 +19,7 @@ import { RunStore } from "../store/run-store.js";
 import { RunView } from "../tui/run-view.js";
 import type { CliOptions } from "./args.js";
 import { parseArgs, printHelp, readPackageVersion } from "./args.js";
-import { cleanupRuntime } from "./cleanup.js";
+import { cleanupRuntime, type CleanupMode } from "./cleanup.js";
 import { ensureGitignore, runInit } from "./init.js";
 import { prepareInputFiles } from "./inputs.js";
 import { runPreflightChecks } from "./preflight.js";
@@ -69,9 +69,11 @@ export async function runCli(): Promise<void> {
 	if (args.command === "cleanup") {
 		const repoRoot = process.cwd();
 		const { config } = loadConfig(repoRoot);
-		const summary = cleanupRuntime(config.runtime.container, "full");
+		const cleanupMode = resolveCleanupMode(config.runtime.cleanupMode, config.runtime.cleanup, args);
+		const mode = args.full ? "full" : cleanupMode;
+		const summary = cleanupRuntime(config.runtime.container, mode);
 		process.stdout.write(
-			`Cleanup (${summary.engine}): removed ${summary.removedActContainers} act container(s), ${summary.removedActVolumes} act volume(s), ${summary.removedActImages} act image(s).\n`,
+			`Cleanup (${summary.engine}, mode=${mode}): removed ${summary.removedActContainers} act container(s), ${summary.removedActVolumes} act volume(s), ${summary.removedActImages} act image(s).\n`,
 		);
 		if (summary.errors.length > 0) {
 			process.stderr.write(`${summary.errors.join("\n")}\n`);
@@ -321,15 +323,34 @@ export async function runCli(): Promise<void> {
 		const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
 		process.stdout.write(`${JSON.stringify(summary)}\\n`);
 	}
-	const shouldCleanupRuntime = args.noCleanup ? false : config.runtime.cleanup;
-	if (shouldCleanupRuntime) {
-		const cleanupSummary = cleanupRuntime(config.runtime.container, "default");
+	const cleanupMode = resolveCleanupMode(config.runtime.cleanupMode, config.runtime.cleanup, args);
+	if (cleanupMode !== "off") {
+		const cleanupSummary = cleanupRuntime(config.runtime.container, cleanupMode);
 		if (cleanupSummary.errors.length > 0 && !args.json) {
 			process.stderr.write(`${cleanupSummary.errors.join("\n")}\n`);
 		}
 	}
 	const shouldTreatInteractiveCancelAsSuccess = isTty && !args.json && result.exitCode === 130;
 	process.exitCode = shouldTreatInteractiveCancelAsSuccess ? 0 : result.exitCode;
+}
+
+function resolveCleanupMode(
+	configMode: CleanupMode,
+	legacyCleanup: boolean | undefined,
+	options: CliOptions,
+): CleanupMode {
+	if (options.noCleanup) {
+		return "off";
+	}
+	if (options.cleanupMode) {
+		if (options.cleanupMode === "off" || options.cleanupMode === "fast" || options.cleanupMode === "full") {
+			return options.cleanupMode;
+		}
+	}
+	if (legacyCleanup === false) {
+		return "off";
+	}
+	return configMode;
 }
 
 function printBanner(): void {

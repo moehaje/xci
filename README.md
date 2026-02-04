@@ -79,7 +79,7 @@ engine: act
 runtime:
   container: docker
   architecture: amd64
-  cleanup: true
+  cleanupMode: fast
   image:
     ubuntu-latest: ghcr.io/catthehacker/ubuntu:act-latest
 presets:
@@ -87,8 +87,12 @@ presets:
     jobs: [build-and-test, code-quality]
 ```
 
-Set `runtime.cleanup: false` to disable automatic post-run act cleanup by default, or pass
-`--no-cleanup` on a run to disable cleanup for that invocation only.
+Cleanup modes:
+- `off`: skip post-run cleanup
+- `fast` (default): remove act containers and ephemeral act volumes, keep `act-toolcache` + images
+- `full`: remove act containers, all act volumes (including `act-toolcache`), and act images
+
+Use `--no-cleanup` to force `off` for one run, or `--cleanup-mode off|fast|full` to override per run.
 
 ## Project Health
 

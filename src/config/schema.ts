@@ -20,6 +20,7 @@ export const ConfigSchema = z.object({
 			image: z.record(z.string()).default({}),
 			platformMap: z.record(z.string()).default({}),
 			cleanup: z.boolean().default(true),
+			cleanupMode: z.enum(["off", "fast", "full"]).default("fast"),
 		})
 		.default({
 			container: "docker",
@@ -27,6 +28,7 @@ export const ConfigSchema = z.object({
 			image: {},
 			platformMap: {},
 			cleanup: true,
+			cleanupMode: "fast",
 		}),
 	env: z.record(z.string()).default({}),
 	vars: z.record(z.string()).default({}),

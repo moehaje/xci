@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-export type CleanupMode = "default" | "full";
+export type CleanupMode = "off" | "fast" | "full";
 
 export type CleanupSummary = {
 	engine: "docker" | "podman";
@@ -12,7 +12,7 @@ export type CleanupSummary = {
 
 export function cleanupRuntime(
 	engine: "docker" | "podman",
-	mode: CleanupMode = "default",
+	mode: CleanupMode = "fast",
 ): CleanupSummary {
 	const summary: CleanupSummary = {
 		engine,
@@ -21,6 +21,10 @@ export function cleanupRuntime(
 		removedActImages: 0,
 		errors: [],
 	};
+
+	if (mode === "off") {
+		return summary;
+	}
 
 	const actContainers = listActContainers(engine);
 	if (actContainers.length > 0) {
@@ -32,7 +36,7 @@ export function cleanupRuntime(
 		}
 	}
 
-	const actVolumes = listActVolumes(engine);
+	const actVolumes = listActVolumes(engine, mode === "full");
 	if (actVolumes.length > 0) {
 		const removal = run(engine, ["volume", "rm", "-f", ...actVolumes]);
 		if (removal.ok) {
@@ -42,17 +46,17 @@ export function cleanupRuntime(
 		}
 	}
 
-	const actImages = listActImages(engine);
-	if (actImages.length > 0) {
-		const removal = run(engine, ["rmi", "-f", ...actImages]);
-		if (removal.ok) {
-			summary.removedActImages = actImages.length;
-		} else {
-			summary.errors.push(`failed to remove act images: ${removal.error}`);
+	if (mode === "full") {
+		const actImages = listActImages(engine);
+		if (actImages.length > 0) {
+			const removal = run(engine, ["rmi", "-f", ...actImages]);
+			if (removal.ok) {
+				summary.removedActImages = actImages.length;
+			} else {
+				summary.errors.push(`failed to remove act images: ${removal.error}`);
+			}
 		}
 	}
-
-	void mode;
 
 	return summary;
 }
@@ -73,7 +77,7 @@ function listActContainers(engine: "docker" | "podman"): { id: string; status: s
 		.filter((item) => item.id.length > 0);
 }
 
-function listActVolumes(engine: "docker" | "podman"): string[] {
+function listActVolumes(engine: "docker" | "podman", includeToolcache: boolean): string[] {
 	const result = run(engine, ["volume", "ls", "--format", "{{.Name}}"]);
 	if (!result.ok || !result.stdout) {
 		return [];
@@ -81,7 +85,17 @@ function listActVolumes(engine: "docker" | "podman"): string[] {
 	return result.stdout
 		.split("\n")
 		.map((line) => line.trim())
-		.filter((name) => name.startsWith("act-"));
+		.filter((name) => isActVolume(name, includeToolcache));
+}
+
+function isActVolume(name: string, includeToolcache: boolean): boolean {
+	if (!name.startsWith("act-")) {
+		return false;
+	}
+	if (!includeToolcache && name === "act-toolcache") {
+		return false;
+	}
+	return true;
 }
 
 function listActImages(engine: "docker" | "podman"): string[] {

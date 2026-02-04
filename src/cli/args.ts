@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import type { CleanupMode } from "./cleanup.js";
 
 export type CliOptions = {
 	command: "run" | "init" | "cleanup";
@@ -11,6 +12,8 @@ export type CliOptions = {
 	matrix?: string[];
 	preset?: string;
 	noCleanup?: boolean;
+	cleanupMode?: CleanupMode;
+	full?: boolean;
 	help?: boolean;
 	version?: boolean;
 	unknown?: string[];
@@ -78,6 +81,22 @@ export function parseArgs(argv: string[]): CliOptions {
 			case "--no-cleanup":
 				options.noCleanup = true;
 				break;
+			case "--cleanup-mode":
+				{
+					const value = takeValue("--cleanup-mode", args, options);
+					if (value) {
+						const normalized = toCleanupMode(value);
+						if (normalized) {
+							options.cleanupMode = normalized;
+						} else {
+							options.errors?.push(`Invalid value for --cleanup-mode: ${value} (expected off|fast|full)`);
+						}
+					}
+				}
+				break;
+			case "--full":
+				options.full = true;
+				break;
 			default:
 				if (arg) {
 					options.unknown?.push(arg);
@@ -106,6 +125,8 @@ export function printHelp(): void {
 	process.stdout.write(`  --matrix <k:v>        Matrix override (repeatable)\n`);
 	process.stdout.write(`  --preset <name>       Preset id\n`);
 	process.stdout.write(`  --no-cleanup          Disable post-run act cleanup\n`);
+	process.stdout.write(`  --cleanup-mode <m>    Cleanup mode: off|fast|full\n`);
+	process.stdout.write(`  --full                For cleanup command, remove act images/toolcache too\n`);
 	process.stdout.write(`  --json                Print JSON summary\n`);
 	process.stdout.write(`  -h, --help            Show help\n`);
 	process.stdout.write(`  -v, --version         Show version\n`);
@@ -135,4 +156,11 @@ function takeValue(flag: string, args: string[], options: CliOptions): string | 
 		return undefined;
 	}
 	return value;
+}
+
+function toCleanupMode(value: string): CleanupMode | undefined {
+	if (value === "off" || value === "fast" || value === "full") {
+		return value;
+	}
+	return undefined;
 }

@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2026-02-04
+
+### Added
+- Add run-view quit flows for canceling active runs and optionally cleaning run files on exit.
+- Add targeted act runtime cleanup command and automatic post-run cleanup handling.
+- Add cleanup controls via config and CLI (`runtime.cleanupMode`, `--cleanup-mode`, `--no-cleanup`).
+- Add GitHub release workflow naming and Homebrew tap automation updates.
+
+### Changed
+- Improve local runner compatibility by skipping unsupported non-Linux jobs when using `act`.
+- Default cleanup mode to `fast` to keep `act-toolcache` and images for faster subsequent runs.
+- Rename GitHub workflow file to `.github/workflows/release.yml`.
+
+### Fixed
+- Avoid stale log-path outro after run-file cleanup in TUI mode.
+- Treat interactive cancel exits as clean process exits to avoid lifecycle failure noise.
+
 ## [0.1.5] - 2026-02-03
 
 ### Added

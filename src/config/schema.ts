@@ -19,12 +19,14 @@ export const ConfigSchema = z.object({
 			architecture: z.string().default("auto"),
 			image: z.record(z.string()).default({}),
 			platformMap: z.record(z.string()).default({}),
+			cleanup: z.boolean().default(true),
 		})
 		.default({
 			container: "docker",
 			architecture: "auto",
 			image: {},
 			platformMap: {},
+			cleanup: true,
 		}),
 	env: z.record(z.string()).default({}),
 	vars: z.record(z.string()).default({}),

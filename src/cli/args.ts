@@ -10,6 +10,7 @@ export type CliOptions = {
 	eventPath?: string;
 	matrix?: string[];
 	preset?: string;
+	noCleanup?: boolean;
 	help?: boolean;
 	version?: boolean;
 	unknown?: string[];
@@ -74,6 +75,9 @@ export function parseArgs(argv: string[]): CliOptions {
 			case "--json":
 				options.json = true;
 				break;
+			case "--no-cleanup":
+				options.noCleanup = true;
+				break;
 			default:
 				if (arg) {
 					options.unknown?.push(arg);
@@ -101,6 +105,7 @@ export function printHelp(): void {
 	process.stdout.write(`  --event-path <file>   JSON payload path\n`);
 	process.stdout.write(`  --matrix <k:v>        Matrix override (repeatable)\n`);
 	process.stdout.write(`  --preset <name>       Preset id\n`);
+	process.stdout.write(`  --no-cleanup          Disable post-run act cleanup\n`);
 	process.stdout.write(`  --json                Print JSON summary\n`);
 	process.stdout.write(`  -h, --help            Show help\n`);
 	process.stdout.write(`  -v, --version         Show version\n`);

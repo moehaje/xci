@@ -321,9 +321,12 @@ export async function runCli(): Promise<void> {
 		const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
 		process.stdout.write(`${JSON.stringify(summary)}\\n`);
 	}
-	const cleanupSummary = cleanupRuntime(config.runtime.container, "default");
-	if (cleanupSummary.errors.length > 0 && !args.json) {
-		process.stderr.write(`${cleanupSummary.errors.join("\n")}\n`);
+	const shouldCleanupRuntime = args.noCleanup ? false : config.runtime.cleanup;
+	if (shouldCleanupRuntime) {
+		const cleanupSummary = cleanupRuntime(config.runtime.container, "default");
+		if (cleanupSummary.errors.length > 0 && !args.json) {
+			process.stderr.write(`${cleanupSummary.errors.join("\n")}\n`);
+		}
 	}
 	const shouldTreatInteractiveCancelAsSuccess = isTty && !args.json && result.exitCode === 130;
 	process.exitCode = shouldTreatInteractiveCancelAsSuccess ? 0 : result.exitCode;

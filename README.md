@@ -79,12 +79,16 @@ engine: act
 runtime:
   container: docker
   architecture: amd64
+  cleanup: true
   image:
     ubuntu-latest: ghcr.io/catthehacker/ubuntu:act-latest
 presets:
   quick:
     jobs: [build-and-test, code-quality]
 ```
+
+Set `runtime.cleanup: false` to disable automatic post-run act cleanup by default, or pass
+`--no-cleanup` on a run to disable cleanup for that invocation only.
 
 ## Project Health
 

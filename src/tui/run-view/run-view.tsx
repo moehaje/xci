@@ -55,6 +55,9 @@ export function RunView({
 	const [stepOutputs, setStepOutputs] = useState<Record<string, string[]>>({});
 	const [stepStatuses, setStepStatuses] = useState<Record<string, RunStatus>>({});
 	const [logError, setLogError] = useState<string | null>(null);
+	const [quitPromptVisible, setQuitPromptVisible] = useState(false);
+	const [cleanupError, setCleanupError] = useState<string | null>(null);
+	const [cleaningUp, setCleaningUp] = useState(false);
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
 	const [liveMode, setLiveMode] = useState(false);
 	const [terminalWidth, setTerminalWidth] = useState<number>(stdout.columns ?? 120);
@@ -175,6 +178,24 @@ export function RunView({
 		start();
 	}, [adapter, appendOutput, context, onComplete, plan]);
 
+	const cleanupRunFilesAndExit = useCallback(() => {
+		if (cleaningUp) {
+			return;
+		}
+		setCleaningUp(true);
+		void (async () => {
+			try {
+				const runDir = path.join(runStoreBase, plan.runId);
+				await fs.promises.rm(runDir, { recursive: true, force: true });
+				exit();
+			} catch (error) {
+				const message = error instanceof Error ? error.message : "Unknown error";
+				setCleanupError(`Failed to clean run files: ${message}`);
+				setCleaningUp(false);
+			}
+		})();
+	}, [cleaningUp, exit, plan.runId, runStoreBase]);
+
 	useEffect(() => {
 		const runPath = path.join(runStoreBase, plan.runId, "run.json");
 		const interval = setInterval(() => {
@@ -265,8 +286,26 @@ export function RunView({
 	}, [runRecord?.logDir, selectedJobIndex, selectedSteps, orderedJobs, liveMode]);
 
 	useInput((input, key) => {
-		if (input === "q" && statusText !== "running") {
-			exit();
+		if (quitPromptVisible) {
+			const lowered = input.toLowerCase();
+			if (lowered === "y") {
+				cleanupRunFilesAndExit();
+				return;
+			}
+			if (lowered === "n" || key.return) {
+				exit();
+				return;
+			}
+			if (key.escape) {
+				setQuitPromptVisible(false);
+				setCleanupError(null);
+			}
+			return;
+		}
+
+		if (input.toLowerCase() === "q" && statusText !== "running") {
+			setQuitPromptVisible(true);
+			setCleanupError(null);
 			return;
 		}
 		if (key.tab || input === "\t") {
@@ -360,7 +399,20 @@ export function RunView({
 			</Box>
 			{statusText !== "running" ? (
 				<Box marginTop={1}>
-					<Text dimColor>Run finished. Press q to exit.</Text>
+					{quitPromptVisible ? (
+						<Text color="yellow">
+							{cleaningUp
+								? "Cleaning run files before exit..."
+								: "Cleanup run files for this run before exit? (y/N, Esc to cancel)"}
+						</Text>
+					) : (
+						<Text dimColor>Run finished. Press q to exit.</Text>
+					)}
+				</Box>
+			) : null}
+			{cleanupError ? (
+				<Box marginTop={1}>
+					<Text color="red">{cleanupError}</Text>
 				</Box>
 			) : null}
 			{readError ? (

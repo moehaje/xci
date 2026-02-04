@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 export type CliOptions = {
-	command: "run" | "init";
+	command: "run" | "init" | "cleanup";
 	workflow?: string;
 	jobs?: string[];
 	all?: boolean;
@@ -21,7 +21,7 @@ export function parseArgs(argv: string[]): CliOptions {
 	const args = [...argv];
 	if (args[0] && !args[0].startsWith("-")) {
 		const command = args[0];
-		if (command === "run" || command === "init") {
+		if (command === "run" || command === "init" || command === "cleanup") {
 			options.command = command;
 		} else {
 			options.command = command as CliOptions["command"];
@@ -90,6 +90,7 @@ export function printHelp(): void {
 	process.stdout.write(`Commands:\n`);
 	process.stdout.write(`  run                  Run workflows (default)\n`);
 	process.stdout.write(`  init                 Add .xci to .gitignore\n\n`);
+	process.stdout.write(`  cleanup              Remove local act containers/volumes/images\n\n`);
 	process.stdout.write(`Options:\n`);
 	process.stdout.write(`  --workflow <file>     Workflow file name or id\n`);
 	process.stdout.write(`  --job <ids>           Comma-separated job ids\n`);

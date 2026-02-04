@@ -107,6 +107,7 @@ export class ActAdapter implements EngineAdapter {
 
 function buildActArgs(context: EngineContext, jobId: string, matrix: string[] | null): string[] {
 	const args = ["act", context.eventName, "--workflows", context.workflowsPath, "--job", jobId];
+	args.push("--rm");
 
 	if (context.eventPayloadPath) {
 		args.push("--eventpath", context.eventPayloadPath);

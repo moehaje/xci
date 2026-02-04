@@ -10,6 +10,7 @@ export type EngineCapabilities = {
 export type EngineContext = {
 	repoRoot: string;
 	workflowsPath: string;
+	containerEngine?: "docker" | "podman";
 	eventName: string;
 	eventPayloadPath?: string;
 	artifactDir: string;

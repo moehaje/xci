@@ -19,6 +19,7 @@ import { RunStore } from "../store/run-store.js";
 import { RunView } from "../tui/run-view.js";
 import type { CliOptions } from "./args.js";
 import { parseArgs, printHelp, readPackageVersion } from "./args.js";
+import { cleanupRuntime } from "./cleanup.js";
 import { ensureGitignore, runInit } from "./init.js";
 import { prepareInputFiles } from "./inputs.js";
 import { runPreflightChecks } from "./preflight.js";
@@ -63,6 +64,19 @@ export async function runCli(): Promise<void> {
 	}
 	if (args.command === "init") {
 		runInit(process.cwd());
+		return;
+	}
+	if (args.command === "cleanup") {
+		const repoRoot = process.cwd();
+		const { config } = loadConfig(repoRoot);
+		const summary = cleanupRuntime(config.runtime.container, "full");
+		process.stdout.write(
+			`Cleanup (${summary.engine}): removed ${summary.removedActContainers} act container(s), ${summary.removedActVolumes} act volume(s), ${summary.removedActImages} act image(s).\n`,
+		);
+		if (summary.errors.length > 0) {
+			process.stderr.write(`${summary.errors.join("\n")}\n`);
+			process.exitCode = 1;
+		}
 		return;
 	}
 	if (args.command !== "run") {
@@ -235,6 +249,7 @@ export async function runCli(): Promise<void> {
 	const engineContext: EngineContext = {
 		repoRoot,
 		workflowsPath: path.dirname(workflow.path),
+		containerEngine: config.runtime.container,
 		eventName: plan.event.name,
 		eventPayloadPath: plan.event.payloadPath,
 		artifactDir: path.join(repoRoot, ".xci", "runs", plan.runId, "artifacts"),
@@ -305,6 +320,10 @@ export async function runCli(): Promise<void> {
 	if (args.json) {
 		const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
 		process.stdout.write(`${JSON.stringify(summary)}\\n`);
+	}
+	const cleanupSummary = cleanupRuntime(config.runtime.container, "default");
+	if (cleanupSummary.errors.length > 0 && !args.json) {
+		process.stderr.write(`${cleanupSummary.errors.join("\n")}\n`);
 	}
 	const shouldTreatInteractiveCancelAsSuccess = isTty && !args.json && result.exitCode === 130;
 	process.exitCode = shouldTreatInteractiveCancelAsSuccess ? 0 : result.exitCode;

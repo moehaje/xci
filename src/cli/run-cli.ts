@@ -319,7 +319,7 @@ function printBanner(): void {
 		const color = mixRgb(start, end, ratio);
 		const line = withForeground(XCI_ASCII_LINES[index], color);
 		if (index === count - 1) {
-			process.stdout.write(`${line} ${withDim(XCI_BANNER_SIGNATURE)}\n`);
+			process.stdout.write(`${line} ${withDim(XCI_BANNER_SIGNATURE)}\n\n`);
 			continue;
 		}
 		process.stdout.write(`${line}\n`);

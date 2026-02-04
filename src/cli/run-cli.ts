@@ -266,7 +266,11 @@ export async function runCli(): Promise<void> {
 			workflow,
 			path.join(repoRoot, ".xci", "runs"),
 		);
-		outro(`Logs: ${result.logsPath}`);
+		if (result.logsPath && fs.existsSync(result.logsPath)) {
+			outro(`Logs: ${result.logsPath}`);
+		} else {
+			outro("Run files were cleaned up.");
+		}
 	} else {
 		if (!args.json) {
 			process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
@@ -283,7 +287,8 @@ export async function runCli(): Promise<void> {
 		const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
 		process.stdout.write(`${JSON.stringify(summary)}\\n`);
 	}
-	process.exitCode = result.exitCode;
+	const shouldTreatInteractiveCancelAsSuccess = isTty && !args.json && result.exitCode === 130;
+	process.exitCode = shouldTreatInteractiveCancelAsSuccess ? 0 : result.exitCode;
 }
 
 function printBanner(): void {

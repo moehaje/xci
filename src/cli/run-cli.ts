@@ -179,8 +179,40 @@ export async function runCli(): Promise<void> {
 	}
 
 	const expanded = expandJobIdsWithNeeds(workflow, selectedJobs);
-	const ordered = sortJobsByNeeds(workflow, expanded);
+	let ordered = sortJobsByNeeds(workflow, expanded);
 	const effectivePayloadPath = args.eventPath ?? preset?.event?.payloadPath;
+
+	const platformResolution = resolvePlatformMap(
+		workflow,
+		ordered,
+		config.runtime.image,
+		config.runtime.platformMap,
+	);
+	const platformMap = platformResolution.map;
+	if (isTty && platformResolution.inferredLabels.length > 0) {
+		process.stdout.write(
+			`Auto-mapped runner labels to local container images: ${platformResolution.inferredLabels.join(", ")}\n`,
+		);
+	}
+	const unrunnableJobs = resolveUnrunnableJobs(workflow, ordered, platformMap);
+	if (unrunnableJobs.size > 0) {
+		const runnable = ordered.filter((jobId) => !unrunnableJobs.has(jobId));
+		const summary = ordered
+			.filter((jobId) => unrunnableJobs.has(jobId))
+			.map((jobId) => `${jobId} (${unrunnableJobs.get(jobId)})`)
+			.join(", ");
+		if (runnable.length === 0) {
+			process.stderr.write(
+				`No runnable jobs for local act execution. Skipped: ${summary}. Select Linux jobs with --job or provide explicit runtime mappings in .xci.yml.\n`,
+			);
+			process.exitCode = 2;
+			return;
+		}
+		process.stdout.write(
+			`Skipping jobs that are not runnable with current local runtime: ${summary}\n`,
+		);
+		ordered = runnable;
+	}
 
 	const plan = buildRunPlan({
 		workflow,
@@ -198,19 +230,6 @@ export async function runCli(): Promise<void> {
 		process.stderr.write(`${inputFiles.error}\n`);
 		process.exitCode = 2;
 		return;
-	}
-
-	const platformResolution = resolvePlatformMap(
-		workflow,
-		ordered,
-		config.runtime.image,
-		config.runtime.platformMap,
-	);
-	const platformMap = platformResolution.map;
-	if (isTty && platformResolution.inferredLabels.length > 0) {
-		process.stdout.write(
-			`Auto-mapped runner labels to local container images: ${platformResolution.inferredLabels.join(", ")}\n`,
-		);
 	}
 
 	const engineContext: EngineContext = {
@@ -579,7 +598,7 @@ function resolvePlatformMap(
 			if (imageMap[label] || platformMap[label] || inferred[label]) {
 				continue;
 			}
-			if (!isSupportedRunnerLabel(label)) {
+			if (!isLinuxRunnerLabel(label)) {
 				continue;
 			}
 			inferred[label] = defaultImage;
@@ -607,21 +626,69 @@ function parseRunsOnLabels(runsOn: string): string[] {
 		.filter(Boolean);
 }
 
-function isSupportedRunnerLabel(label: string): boolean {
+function resolveUnrunnableJobs(
+	workflow: Workflow,
+	jobIds: string[],
+	platformMap: Record<string, string>,
+): Map<string, string> {
+	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
+	const selected = new Set(jobIds);
+	const normalizedMappings = new Set(Object.keys(platformMap).map((value) => value.toLowerCase()));
+	const reasons = new Map<string, string>();
+
+	for (const jobId of jobIds) {
+		const job = jobMap.get(jobId);
+		if (!job) {
+			continue;
+		}
+		if (!job.runsOn) {
+			reasons.set(jobId, "missing runs-on configuration");
+			continue;
+		}
+		const labels = parseRunsOnLabels(job.runsOn);
+		const unsupported = labels.filter((label) => {
+			const normalized = label.toLowerCase();
+			if (normalizedMappings.has(normalized)) {
+				return false;
+			}
+			if (isLinuxRunnerLabel(normalized)) {
+				return false;
+			}
+			return true;
+		});
+		if (unsupported.length > 0) {
+			reasons.set(jobId, `unsupported runner labels: ${unsupported.join(", ")}`);
+		}
+	}
+
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const jobId of jobIds) {
+			if (reasons.has(jobId)) {
+				continue;
+			}
+			const job = jobMap.get(jobId);
+			if (!job) {
+				continue;
+			}
+			const blockingNeeds = job.needs.filter((need) => selected.has(need) && reasons.has(need));
+			if (blockingNeeds.length > 0) {
+				reasons.set(jobId, `depends on skipped job(s): ${blockingNeeds.join(", ")}`);
+				changed = true;
+			}
+		}
+	}
+
+	return reasons;
+}
+
+function isLinuxRunnerLabel(label: string): boolean {
 	const value = label.toLowerCase();
-	if (value.startsWith("ubuntu-")) {
+	if (value === "linux" || value === "ubuntu") {
 		return true;
 	}
-	if (value.startsWith("macos-")) {
-		return true;
-	}
-	if (value.startsWith("windows-")) {
-		return true;
-	}
-	if (value === "ubuntu" || value === "linux" || value === "macos" || value === "windows") {
-		return true;
-	}
-	return value.startsWith("self-hosted");
+	return value.startsWith("ubuntu-");
 }
 
 function resolveContainerArchitecture(configured: string | undefined): string | undefined {

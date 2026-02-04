@@ -63,7 +63,7 @@ end
 ### Release workflow (each npm release)
 
 By default, this repository now updates the tap formula automatically via
-`.github/workflows/update-homebrew-tap.yml` on GitHub Release publish.
+`.github/workflows/release.yml` on GitHub Release publish.
 
 1. Publish npm version first.
 2. Run metadata generator in this repo:

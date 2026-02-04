@@ -42,6 +42,6 @@ npm run release:homebrew-metadata
 ```
 
 Tap updates are automated on GitHub Release publish via
-`.github/workflows/update-homebrew-tap.yml`.
+`.github/workflows/release.yml`.
 
 See `docs/homebrew-core.md` for the tap-now/core-later release flow.

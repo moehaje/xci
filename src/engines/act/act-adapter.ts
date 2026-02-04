@@ -52,6 +52,11 @@ export class ActAdapter implements EngineAdapter {
 		let exitCode = 0;
 
 		for (const [index, job] of plan.jobs.entries()) {
+			if (context.signal?.aborted) {
+				exitCode = 130;
+				markRemainingCanceled(runRecord, index);
+				break;
+			}
 			const logsPath = store.createLogFile(plan.runId, job.jobId);
 			lastLogsPath = logsPath;
 
@@ -71,9 +76,20 @@ export class ActAdapter implements EngineAdapter {
 			store.writeRun(runRecord);
 
 			const logStream = fs.createWriteStream(logsPath, { flags: "a" });
-			exitCode = await runAct(engineArgs, context.repoRoot, logStream, job.jobId, context.onOutput);
+			exitCode = await runAct(
+				engineArgs,
+				context.repoRoot,
+				logStream,
+				job.jobId,
+				context.onOutput,
+				context.signal,
+			);
 
-			finalizeJobRun(jobRun, exitCode);
+			if (exitCode === 130) {
+				finalizeCanceledJobRun(jobRun);
+			} else {
+				finalizeJobRun(jobRun, exitCode);
+			}
 			store.writeRun(runRecord);
 
 			if (exitCode !== 0) {
@@ -203,12 +219,23 @@ function finalizeJobRun(jobRun: JobRun, exitCode: number): void {
 	jobRun.durationMs = durationMs;
 }
 
+function finalizeCanceledJobRun(jobRun: JobRun): void {
+	const finishedAt = new Date().toISOString();
+	const durationMs =
+		new Date(finishedAt).getTime() - new Date(jobRun.startedAt ?? finishedAt).getTime();
+	jobRun.status = "canceled";
+	jobRun.exitCode = 130;
+	jobRun.finishedAt = finishedAt;
+	jobRun.durationMs = durationMs;
+}
+
 function finalizeRunRecord(run: RunRecord): void {
 	const finishedAt = new Date().toISOString();
 	const hasFailure = run.jobs.some((job) => job.status === "failed");
+	const hasCanceled = run.jobs.some((job) => job.status === "canceled");
 	const isRunning = run.jobs.some((job) => job.status === "running");
 	if (!isRunning) {
-		run.status = hasFailure ? "failed" : "success";
+		run.status = hasFailure ? "failed" : hasCanceled ? "canceled" : "success";
 		run.finishedAt = finishedAt;
 	}
 }
@@ -227,8 +254,14 @@ function runAct(
 	logStream: fs.WriteStream,
 	jobId: string,
 	onOutput?: (chunk: string, source: "stdout" | "stderr", jobId?: string) => void,
+	signal?: AbortSignal,
 ): Promise<number> {
 	return new Promise((resolve) => {
+		if (signal?.aborted) {
+			logStream.end();
+			resolve(130);
+			return;
+		}
 		const [command, ...commandArgs] = args;
 		const formatter = createActOutputFormatter();
 		const commandLine = `$ ${formatActCommand(args)}\n`;
@@ -257,6 +290,29 @@ function runAct(
 			}
 		};
 		const child = spawn(command, commandArgs, { cwd, env: process.env });
+		let settled = false;
+
+		const finish = (code: number): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			if (signal) {
+				signal.removeEventListener("abort", onAbort);
+			}
+			logStream.end();
+			resolve(code);
+		};
+
+		const onAbort = (): void => {
+			if (!child.killed) {
+				child.kill("SIGTERM");
+			}
+		};
+
+		if (signal) {
+			signal.addEventListener("abort", onAbort, { once: true });
+		}
 
 		child.stdout.on("data", (chunk: Buffer) => {
 			const text = chunk.toString();
@@ -293,8 +349,7 @@ function runAct(
 					onOutput(remaining, "stdout", jobId);
 				}
 			}
-			logStream.end();
-			resolve(code ?? 1);
+			finish(signal?.aborted ? 130 : (code ?? 1));
 		});
 	});
 }

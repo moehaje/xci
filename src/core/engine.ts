@@ -20,6 +20,7 @@ export type EngineContext = {
 	matrixOverride?: string[];
 	platformMap?: Record<string, string>;
 	extraArgs?: string[];
+	signal?: AbortSignal;
 	onOutput?: (chunk: string, source: "stdout" | "stderr", jobId?: string) => void;
 };
 

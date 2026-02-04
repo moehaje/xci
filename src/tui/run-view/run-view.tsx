@@ -58,6 +58,8 @@ export function RunView({
 	const [quitPromptVisible, setQuitPromptVisible] = useState(false);
 	const [cleanupError, setCleanupError] = useState<string | null>(null);
 	const [cleaningUp, setCleaningUp] = useState(false);
+	const [cancelError, setCancelError] = useState<string | null>(null);
+	const [cancelingRun, setCancelingRun] = useState(false);
 	const [spinnerIndex, setSpinnerIndex] = useState(0);
 	const [liveMode, setLiveMode] = useState(false);
 	const [terminalWidth, setTerminalWidth] = useState<number>(stdout.columns ?? 120);
@@ -68,6 +70,7 @@ export function RunView({
 	const logBuffers = useRef(new Map<string, string>());
 	const liveOutputUsed = useRef(false);
 	const flushTimer = useRef<NodeJS.Timeout | null>(null);
+	const abortControllerRef = useRef<AbortController | null>(null);
 	const selectedJobRef = useRef<{ jobId: string; status: RunStatus } | undefined>(undefined);
 	const selectedStepsRef = useRef<Job["steps"]>([]);
 
@@ -167,11 +170,17 @@ export function RunView({
 		setStatusText("running");
 
 		const start = async (): Promise<void> => {
+			const controller = new AbortController();
+			abortControllerRef.current = controller;
 			const result = await adapter.run(plan, {
 				...context,
+				signal: controller.signal,
 				onOutput: appendOutput,
 			});
-			setStatusText(result.exitCode === 0 ? "success" : "failed");
+			abortControllerRef.current = null;
+			setCancelingRun(false);
+			setQuitPromptVisible(false);
+			setStatusText(result.exitCode === 0 ? "success" : result.exitCode === 130 ? "canceled" : "failed");
 			onComplete(result);
 		};
 
@@ -195,6 +204,20 @@ export function RunView({
 			}
 		})();
 	}, [cleaningUp, exit, plan.runId, runStoreBase]);
+
+	const cancelRun = useCallback(() => {
+		if (cancelingRun) {
+			return;
+		}
+		const controller = abortControllerRef.current;
+		if (!controller) {
+			setCancelError("No active run to cancel.");
+			return;
+		}
+		setCancelError(null);
+		setCancelingRun(true);
+		controller.abort();
+	}, [cancelingRun]);
 
 	useEffect(() => {
 		const runPath = path.join(runStoreBase, plan.runId, "run.json");
@@ -288,6 +311,17 @@ export function RunView({
 	useInput((input, key) => {
 		if (quitPromptVisible) {
 			const lowered = input.toLowerCase();
+			if (statusText === "running") {
+				if (lowered === "y") {
+					cancelRun();
+					return;
+				}
+				if (lowered === "n" || key.return || key.escape) {
+					setQuitPromptVisible(false);
+					setCancelError(null);
+				}
+				return;
+			}
 			if (lowered === "y") {
 				cleanupRunFilesAndExit();
 				return;
@@ -303,9 +337,10 @@ export function RunView({
 			return;
 		}
 
-		if (input.toLowerCase() === "q" && statusText !== "running") {
+		if (input.toLowerCase() === "q") {
 			setQuitPromptVisible(true);
 			setCleanupError(null);
+			setCancelError(null);
 			return;
 		}
 		if (key.tab || input === "\t") {
@@ -397,6 +432,15 @@ export function RunView({
 					Space/Enter: toggle step · Q: exit
 				</Text>
 			</Box>
+			{quitPromptVisible && statusText === "running" ? (
+				<Box marginTop={1}>
+					<Text color="yellow">
+						{cancelingRun
+							? "Canceling run..."
+							: "Cancel the current run and stop execution? (y/N, Esc to continue)"}
+					</Text>
+				</Box>
+			) : null}
 			{statusText !== "running" ? (
 				<Box marginTop={1}>
 					{quitPromptVisible ? (
@@ -413,6 +457,11 @@ export function RunView({
 			{cleanupError ? (
 				<Box marginTop={1}>
 					<Text color="red">{cleanupError}</Text>
+				</Box>
+			) : null}
+			{cancelError ? (
+				<Box marginTop={1}>
+					<Text color="red">{cancelError}</Text>
 				</Box>
 			) : null}
 			{readError ? (

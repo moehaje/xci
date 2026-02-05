@@ -166,6 +166,155 @@ export function mergeStepStatuses(
 	return merged;
 }
 
+export type StepChunkParser = {
+	readonly steps: Job["steps"];
+	readonly nameToIndices: Map<string, number[]>;
+	readonly nameToCursor: Map<string, number>;
+	readonly lastIndexForName: Map<string, number>;
+	currentIndex: number | null;
+	remainder: string;
+};
+
+export type StepChunkParseResult = {
+	statuses: Record<string, RunStatus>;
+	outputs: Record<string, string[]>;
+};
+
+export function createStepChunkParser(steps: Job["steps"]): StepChunkParser {
+	const nameToIndices = new Map<string, number[]>();
+	steps.forEach((step, index) => {
+		const key = normalizeStepName(step.name);
+		const list = nameToIndices.get(key) ?? [];
+		list.push(index);
+		nameToIndices.set(key, list);
+	});
+
+	return {
+		steps,
+		nameToIndices,
+		nameToCursor: new Map<string, number>(),
+		lastIndexForName: new Map<string, number>(),
+		currentIndex: null,
+		remainder: "",
+	};
+}
+
+export function parseStepChunk(parser: StepChunkParser, chunk: string): StepChunkParseResult {
+	const statusMap: Record<string, RunStatus> = {};
+	const outputMap: Record<string, string[]> = {};
+
+	if (parser.steps.length === 0) {
+		return { statuses: statusMap, outputs: outputMap };
+	}
+
+	const input = parser.remainder + chunk;
+	const lines = input.split(/\r?\n/);
+	parser.remainder = lines.pop() ?? "";
+
+	for (const line of lines.map(stripAnsi)) {
+		const startMatch = line.match(/(?:⭐\s+Run|▾\s+Run)\s+(.+)$/);
+		if (startMatch) {
+			const key = normalizeStepName(startMatch[1]);
+			const index = resolveIndex(
+				key,
+				parser.nameToIndices,
+				parser.nameToCursor,
+				parser.lastIndexForName,
+			);
+			if (index === undefined) {
+				parser.currentIndex = null;
+				continue;
+			}
+			statusMap[parser.steps[index].id] = "running";
+			parser.lastIndexForName.set(key, index);
+			parser.currentIndex = index;
+			continue;
+		}
+
+		const successMatch = line.match(/(?:✅\s+Success\s+-|✓)\s+(.+)$/);
+		if (successMatch) {
+			const key = normalizeStepName(successMatch[1]);
+			const index =
+				parser.lastIndexForName.get(key) ??
+				resolveIndex(
+					key,
+					parser.nameToIndices,
+					parser.nameToCursor,
+					parser.lastIndexForName,
+				);
+			if (index !== undefined) {
+				statusMap[parser.steps[index].id] = "success";
+				if (parser.currentIndex === index) {
+					parser.currentIndex = null;
+				}
+			}
+			continue;
+		}
+
+		const failureMatch = line.match(/(?:❌\s+Failure\s+-|✗)\s+(.+)$/);
+		if (failureMatch) {
+			const key = normalizeStepName(failureMatch[1]);
+			const index =
+				parser.lastIndexForName.get(key) ??
+				resolveIndex(
+					key,
+					parser.nameToIndices,
+					parser.nameToCursor,
+					parser.lastIndexForName,
+				);
+			if (index !== undefined) {
+				statusMap[parser.steps[index].id] = "failed";
+				parser.lastIndexForName.set(key, index);
+				if (parser.currentIndex === index) {
+					parser.currentIndex = null;
+				}
+			}
+			continue;
+		}
+
+		if (parser.currentIndex === null) {
+			continue;
+		}
+		if (line.trim().length === 0) {
+			continue;
+		}
+		const stepId = parser.steps[parser.currentIndex]?.id;
+		if (!stepId) {
+			continue;
+		}
+		outputMap[stepId] = outputMap[stepId] ?? [];
+		outputMap[stepId].push(line);
+		if (outputMap[stepId].length > MAX_LOG_LINES) {
+			outputMap[stepId] = outputMap[stepId].slice(-MAX_LOG_LINES);
+		}
+	}
+
+	return { statuses: statusMap, outputs: outputMap };
+}
+
+export function resetStepChunkParser(parser: StepChunkParser): void {
+	parser.nameToCursor.clear();
+	parser.lastIndexForName.clear();
+	parser.currentIndex = null;
+	parser.remainder = "";
+}
+
+export function mergeStepOutputs(
+	previous: Record<string, string[]>,
+	next: Record<string, string[]>,
+): Record<string, string[]> {
+	const merged: Record<string, string[]> = { ...previous };
+	for (const [stepId, lines] of Object.entries(next)) {
+		if (lines.length === 0) {
+			continue;
+		}
+		const current = merged[stepId] ?? [];
+		const combined = current.concat(lines);
+		merged[stepId] = combined.slice(-MAX_LOG_LINES);
+	}
+	return merged;
+}
+
 function normalizeStepName(name: string): string {
 	return name
 		.replace(/\s*\[[^\]]+]\s*$/g, "")

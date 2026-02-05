@@ -3,7 +3,7 @@ import path from "node:path";
 import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter, EngineContext, EngineRunResult } from "../../core/engine.js";
-import type { Job, RunPlan, RunRecord, RunStatus, Workflow } from "../../core/types.js";
+import type { RunPlan, RunRecord, RunStatus, Workflow } from "../../core/types.js";
 import { getJobLogFileName } from "../../store/run-store.js";
 import type { DetailsPaneFocus } from "./components/details-pane.js";
 import { DetailsPane } from "./components/details-pane.js";
@@ -12,6 +12,7 @@ import { SummaryPane } from "./components/summary-pane.js";
 import { buildSummaryGraph } from "./model/summary-graph.js";
 import type { DiagramLine } from "./render/diagram.js";
 import { buildDiagramLines } from "./render/diagram.js";
+import { formatHelpText } from "./utils/help.js";
 import {
 	DEFAULT_VIEW,
 	LOG_TAIL_LINES,
@@ -19,7 +20,14 @@ import {
 	SPINNER_FRAMES,
 	SUMMARY_GRAPH_MIN_WIDTH,
 } from "./utils/constants.js";
-import { mergeStepStatuses, parseStepData } from "./utils/parser.js";
+import {
+	createStepChunkParser,
+	mergeStepOutputs,
+	mergeStepStatuses,
+	parseStepChunk,
+	parseStepData,
+	resetStepChunkParser,
+} from "./utils/parser.js";
 import { colorForStatus, renderStatusGlyph, STATUS_LABELS } from "./utils/status.js";
 
 export type RunViewProps = {
@@ -68,12 +76,12 @@ export function RunView({
 	const running = useRef(false);
 	const runReadInFlight = useRef(false);
 	const logReadInFlight = useRef(false);
-	const logBuffers = useRef(new Map<string, string>());
-	const liveOutputUsed = useRef(false);
+	const pendingChunks = useRef(new Map<string, string>());
 	const flushTimer = useRef<NodeJS.Timeout | null>(null);
+	const stepParsers = useRef(new Map<string, ReturnType<typeof createStepChunkParser>>());
+	const polledOffsets = useRef(new Map<string, number>());
 	const abortControllerRef = useRef<AbortController | null>(null);
-	const selectedJobRef = useRef<{ jobId: string; status: RunStatus } | undefined>(undefined);
-	const selectedStepsRef = useRef<Job["steps"]>([]);
+	const selectedJobRef = useRef<{ jobId: string } | undefined>(undefined);
 
 	const orderedJobs = useMemo(() => {
 		return plan.jobs.map((job) => {
@@ -95,9 +103,8 @@ export function RunView({
 	const selectedSteps = useMemo(() => selectedJobModel?.steps ?? [], [selectedJobModel]);
 
 	useEffect(() => {
-		selectedJobRef.current = selectedJob ?? undefined;
-		selectedStepsRef.current = selectedSteps;
-	}, [selectedJob, selectedSteps]);
+		selectedJobRef.current = selectedJob ? { jobId: selectedJob.jobId } : undefined;
+	}, [selectedJob]);
 
 	useEffect(() => {
 		setSelectedStepIndex((prev) => {
@@ -113,33 +120,45 @@ export function RunView({
 			if (!jobId) {
 				return;
 			}
-			liveOutputUsed.current = true;
 			if (!liveMode) {
 				setLiveMode(true);
 			}
-			const current = logBuffers.current.get(jobId) ?? "";
-			const next = current + chunk;
-			logBuffers.current.set(jobId, next);
-			const currentJob = selectedJobRef.current;
-			if (!currentJob || jobId !== currentJob.jobId) {
-				return;
-			}
+			const current = pendingChunks.current.get(jobId) ?? "";
+			pendingChunks.current.set(jobId, current + chunk);
 			if (flushTimer.current) {
 				return;
 			}
 			flushTimer.current = setTimeout(() => {
 				flushTimer.current = null;
-				const buffered = logBuffers.current.get(jobId);
-				const jobNow = selectedJobRef.current;
-				if (!buffered || !jobNow || jobNow.jobId !== jobId) {
-					return;
+				const statusUpdates: Record<string, RunStatus> = {};
+				const outputUpdates: Record<string, string[]> = {};
+				for (const [pendingJobId, pending] of pendingChunks.current.entries()) {
+					if (!pending) {
+						continue;
+					}
+					const model = jobLookup.get(pendingJobId);
+					if (!model) {
+						continue;
+					}
+					let parser = stepParsers.current.get(pendingJobId);
+					if (!parser) {
+						parser = createStepChunkParser(model.steps);
+						stepParsers.current.set(pendingJobId, parser);
+					}
+					const parsed = parseStepChunk(parser, pending);
+					Object.assign(statusUpdates, parsed.statuses);
+					Object.assign(outputUpdates, parsed.outputs);
 				}
-				const parsed = parseStepData(selectedStepsRef.current, buffered, jobNow.status);
-				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
-				setStepOutputs(parsed.outputs);
+				pendingChunks.current.clear();
+				if (Object.keys(statusUpdates).length > 0) {
+					setStepStatuses((prev) => mergeStepStatuses(prev, statusUpdates));
+				}
+				if (Object.keys(outputUpdates).length > 0) {
+					setStepOutputs((prev) => mergeStepOutputs(prev, outputUpdates));
+				}
 			}, 100);
 		},
-		[liveMode],
+		[jobLookup, liveMode],
 	);
 
 	const diagramLines = useMemo<DiagramLine[]>(() => {
@@ -274,15 +293,10 @@ export function RunView({
 		if (!currentJob) {
 			return;
 		}
-		if (liveMode || liveOutputUsed.current) {
-			const buffer = logBuffers.current.get(currentJob.jobId);
-			if (buffer) {
-				const parsed = parseStepData(selectedSteps, buffer, currentJob.status);
-				setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
-				setStepOutputs(parsed.outputs);
-			}
+		if (liveMode) {
 			return;
 		}
+		const jobId = currentJob.jobId;
 		const logPath = path.join(runRecord.logDir, getJobLogFileName(currentJob.jobId));
 		const interval = setInterval(() => {
 			if (logReadInFlight.current) {
@@ -292,9 +306,35 @@ export function RunView({
 			void (async () => {
 				try {
 					const raw = await fs.promises.readFile(logPath, "utf-8");
-					const parsed = parseStepData(selectedSteps, raw, currentJob.status);
-					setStepStatuses((prev) => mergeStepStatuses(prev, parsed.statuses));
-					setStepOutputs(parsed.outputs);
+					const model = jobLookup.get(jobId);
+					if (!model) {
+						return;
+					}
+					const previousOffset = polledOffsets.current.get(jobId) ?? 0;
+					const didRotate = raw.length < previousOffset;
+					if (didRotate) {
+						polledOffsets.current.set(jobId, 0);
+						const parser = stepParsers.current.get(jobId);
+						if (parser) {
+							resetStepChunkParser(parser);
+						}
+					}
+					const offset = polledOffsets.current.get(jobId) ?? 0;
+					const delta = raw.slice(offset);
+					polledOffsets.current.set(jobId, raw.length);
+
+					let parser = stepParsers.current.get(jobId);
+					if (!parser) {
+						parser = createStepChunkParser(model.steps);
+						stepParsers.current.set(jobId, parser);
+					}
+					const parsedDelta = parseStepChunk(parser, delta);
+					setStepStatuses((prev) => {
+						const merged = mergeStepStatuses(prev, parsedDelta.statuses);
+						const finalized = parseStepData(model.steps, "", currentJob.status);
+						return mergeStepStatuses(merged, finalized.statuses);
+					});
+					setStepOutputs((prev) => mergeStepOutputs(prev, parsedDelta.outputs));
 					setLogError(null);
 				} catch (error) {
 					const message = error instanceof Error ? error.message : "Unknown error";
@@ -307,7 +347,24 @@ export function RunView({
 			})();
 		}, POLL_INTERVAL_MS);
 		return () => clearInterval(interval);
-	}, [runRecord?.logDir, selectedJobIndex, selectedSteps, orderedJobs, liveMode]);
+	}, [jobLookup, liveMode, orderedJobs, runRecord?.logDir, selectedJobIndex]);
+
+	useEffect(() => {
+		if (!runRecord) {
+			return;
+		}
+		for (const jobRun of runRecord.jobs) {
+			if (jobRun.status === "pending" || jobRun.status === "running") {
+				continue;
+			}
+			const model = jobLookup.get(jobRun.jobId);
+			if (!model) {
+				continue;
+			}
+			const finalized = parseStepData(model.steps, "", jobRun.status);
+			setStepStatuses((prev) => mergeStepStatuses(prev, finalized.statuses));
+		}
+	}, [jobLookup, runRecord]);
 
 	useInput((input, key) => {
 		if (quitPromptVisible) {
@@ -429,8 +486,7 @@ export function RunView({
 
 			<Box marginTop={1}>
 				<Text dimColor>
-					Tab: switch view · S: summary · D: details · Left/Right: focus pane · Up/Down: move ·
-					Space/Enter: toggle step · Q: exit
+					{formatHelpText({ viewMode, focusedPane, quitPromptVisible, statusText })}
 				</Text>
 			</Box>
 			{quitPromptVisible && statusText === "running" ? (

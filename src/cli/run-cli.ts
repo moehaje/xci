@@ -1,22 +1,37 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { cancel, intro, isCancel, multiselect, outro, select, text } from "@clack/prompts";
-import { render } from "ink";
-import React from "react";
+import { cancel, intro, isCancel, select } from "@clack/prompts";
 import { loadConfig } from "../config/load-config.js";
 import { discoverWorkflows } from "../core/discovery.js";
-import type { EngineAdapter, EngineContext, EngineRunResult } from "../core/engine.js";
+import type { EngineAdapter, EngineContext } from "../core/engine.js";
 import {
 	buildRunPlan,
 	expandJobIdsWithNeeds,
 	filterJobsForEvent,
 	sortJobsByNeeds,
 } from "../core/plan.js";
-import type { RunPlan, RunPreset, Workflow } from "../core/types.js";
-import { ActAdapter } from "../engines/act/act-adapter.js";
-import { RunStore } from "../store/run-store.js";
-import { RunView } from "../tui/run-view.js";
+import type { Workflow } from "../core/types.js";
+import { executeRun } from "./execute-run.js";
+import { createEngineAdapter } from "../engines/factory.js";
+import { buildJsonSummary } from "./output.js";
+import {
+	resolveContainerArchitecture,
+	resolvePlatformMap,
+	resolvePresets,
+	resolveSupportedEvents,
+	resolveUnrunnableJobs,
+} from "./plan-run.js";
+import {
+	collectMatrixKeys,
+	promptMatrix,
+	resolveJobsFromArgs,
+	resolveWorkflow,
+	selectEvent,
+	selectJobs,
+	selectPreset,
+} from "./select.js";
+import { createRunEventPersister, RunStore } from "../store/run-store.js";
 import type { CliOptions } from "./args.js";
 import { parseArgs, printHelp, readPackageVersion } from "./args.js";
 import { cleanupRuntime, type CleanupMode } from "./cleanup.js";
@@ -241,6 +256,8 @@ export async function runCli(): Promise<void> {
 
 	const runStore = new RunStore(path.join(repoRoot, ".xci", "runs"));
 	const runDir = runStore.createRunDir(plan.runId);
+	const logsDir = runStore.createLogsDir(plan.runId);
+	const artifactsDir = runStore.createArtifactsDir(plan.runId);
 	const inputFiles = prepareInputFiles(runDir, config);
 	if (!inputFiles.ok) {
 		process.stderr.write(`${inputFiles.error}\n`);
@@ -250,17 +267,21 @@ export async function runCli(): Promise<void> {
 
 	const engineContext: EngineContext = {
 		repoRoot,
+		runDir,
+		logsDir,
 		workflowsPath: path.dirname(workflow.path),
 		containerEngine: config.runtime.container,
 		eventName: plan.event.name,
 		eventPayloadPath: plan.event.payloadPath,
-		artifactDir: path.join(repoRoot, ".xci", "runs", plan.runId, "artifacts"),
+		artifactDir: artifactsDir,
 		containerArchitecture: resolveContainerArchitecture(config.runtime.architecture),
 		platformMap,
 		envFile: inputFiles.envFile,
 		varsFile: inputFiles.varsFile,
 		secretsFile: inputFiles.secretsFile,
 		matrixOverride: plan.jobs[0]?.matrix ?? undefined,
+		jobLogPathFor: (jobId) => runStore.createLogFile(plan.runId, jobId),
+		onEvent: createRunEventPersister(runStore),
 	};
 	const runContext: EngineContext = args.json
 		? {
@@ -290,35 +311,25 @@ export async function runCli(): Promise<void> {
 		return;
 	}
 
-	const adapter = new ActAdapter();
-	const planned = await adapter.plan(runContext, plan);
-
-	let result: EngineRunResult | null = null;
-	if (isTty && !args.json) {
-		result = await runWithInk(
-			adapter,
-			planned,
-			runContext,
-			workflow,
-			path.join(repoRoot, ".xci", "runs"),
-		);
-		if (result.logsPath && fs.existsSync(result.logsPath)) {
-			outro(`Logs: ${result.logsPath}`);
-		} else {
-			outro("Run files were cleaned up.");
-		}
-	} else {
-		if (!args.json) {
-			process.stdout.write(`Running ${planned.jobs.length} job(s) with act...\\n`);
-		}
-		result = await adapter.run(planned, runContext);
-		if (!args.json) {
-			process.stdout.write(`Finished with exit code ${result.exitCode}\\n`);
-		}
-		if (!args.json) {
-			process.stdout.write(`Logs: ${result.logsPath}\\n`);
-		}
+	let adapter: EngineAdapter;
+	try {
+		adapter = createEngineAdapter(config.engine);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : "Unknown engine error.";
+		process.stderr.write(`${message}\n`);
+		process.exitCode = 2;
+		return;
 	}
+	const planned = await adapter.plan(runContext, plan);
+	const result = await executeRun({
+		adapter,
+		plan: planned,
+		context: runContext,
+		workflow,
+		runStoreBase: path.join(repoRoot, ".xci", "runs"),
+		isTty,
+		json: Boolean(args.json),
+	});
 	if (args.json) {
 		const summary = await buildJsonSummary(repoRoot, plan.runId, workflow, ordered);
 		process.stdout.write(`${JSON.stringify(summary)}\\n`);
@@ -414,383 +425,4 @@ function withBackground(
 
 function withDim(text: string): string {
 	return `\u001B[2m${text}\u001B[0m`;
-}
-
-function resolveWorkflow(workflows: Workflow[], selector?: string): Workflow | undefined {
-	if (!selector) {
-		return workflows.length === 1 ? workflows[0] : undefined;
-	}
-	return workflows.find((wf) => wf.id.endsWith(selector) || wf.name === selector);
-}
-
-function resolveJobsFromArgs(options: CliOptions, preset?: RunPreset): string[] | undefined {
-	if (options.all) {
-		return undefined;
-	}
-	if (options.jobs?.length) {
-		return options.jobs;
-	}
-	if (options.preset && preset?.jobIds?.length) {
-		return preset.jobIds;
-	}
-	return undefined;
-}
-
-function resolvePresets(
-	presets: Record<
-		string,
-		{
-			jobs: string[];
-			event?: { name: string; payloadPath?: string };
-			matrix?: string[];
-		}
-	>,
-	allJobs: { id: string }[],
-	defaultPreset?: string,
-): RunPreset[] {
-	const resolved: RunPreset[] = Object.entries(presets).map(([id, preset]) => ({
-		id,
-		label: id,
-		jobIds: preset.jobs,
-		event: preset.event,
-		matrixOverride: preset.matrix,
-	}));
-
-	if (!resolved.some((preset) => preset.id === "quick")) {
-		resolved.push({
-			id: "quick",
-			label: "quick",
-			jobIds: allJobs.slice(0, 2).map((job) => job.id),
-		});
-	}
-
-	if (!resolved.some((preset) => preset.id === "full")) {
-		resolved.push({
-			id: "full",
-			label: "full",
-			jobIds: allJobs.map((job) => job.id),
-		});
-	}
-
-	if (defaultPreset && !resolved.some((preset) => preset.id === defaultPreset)) {
-		resolved.unshift({
-			id: defaultPreset,
-			label: defaultPreset,
-			jobIds: allJobs.map((job) => job.id),
-		});
-	}
-
-	return resolved;
-}
-
-async function selectEvent(defaultEvent: string, events: string[]): Promise<string | null> {
-	const selection = await select({
-		message: "Select an event",
-		initialValue: events.includes(defaultEvent) ? defaultEvent : events[0],
-		options: events.map((event) => ({ value: event, label: event })),
-	});
-	if (isCancel(selection)) {
-		cancel("Canceled.");
-		return null;
-	}
-	return selection;
-}
-
-async function selectPreset(presets: RunPreset[], current: string): Promise<RunPreset | null> {
-	const selection = await select({
-		message: "Select a preset",
-		initialValue: current,
-		options: presets.map((preset) => ({
-			value: preset.id,
-			label: preset.label,
-		})),
-	});
-	if (isCancel(selection)) {
-		cancel("Canceled.");
-		return null;
-	}
-	return presets.find((preset) => preset.id === selection) ?? null;
-}
-
-async function selectJobs(
-	jobs: { id: string; name: string }[],
-	initial: string[],
-): Promise<string[] | null> {
-	const selection = await multiselect({
-		message: "Select jobs to run",
-		options: jobs.map((job) => ({
-			value: job.id,
-			label: job.name,
-		})),
-		initialValues: initial,
-	});
-	if (isCancel(selection)) {
-		cancel("Canceled.");
-		return null;
-	}
-	return selection;
-}
-
-async function promptMatrix(matrixKeys: string[]): Promise<string[] | undefined | null> {
-	const hasKeys = matrixKeys.length > 0;
-	const message = hasKeys
-		? `Matrix override (optional, format: key:value,key:value) [available keys: ${matrixKeys.join(", ")}]`
-		: "Matrix override (optional, format: key:value,key:value)";
-	const selection = await text({
-		message,
-		placeholder: hasKeys
-			? matrixKeys.map((key) => `${key}:<value>`).join(",")
-			: "key:value,key:value",
-	});
-	if (isCancel(selection)) {
-		cancel("Canceled.");
-		return null;
-	}
-	if (!selection) {
-		return undefined;
-	}
-	return parseMatrixInput(selection);
-}
-
-function parseMatrixInput(input: string): string[] | undefined {
-	const items = input
-		.split(",")
-		.map((item) => item.trim())
-		.filter(Boolean);
-	return items.length > 0 ? items : undefined;
-}
-
-function collectMatrixKeys(workflow: Workflow, jobIds: string[]): string[] {
-	const keys = new Set<string>();
-	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
-
-	for (const jobId of jobIds) {
-		const matrix = jobMap.get(jobId)?.strategy?.matrix;
-		if (!matrix) {
-			continue;
-		}
-		for (const key of Object.keys(matrix)) {
-			if (key === "include" || key === "exclude") {
-				continue;
-			}
-			keys.add(key);
-		}
-	}
-
-	return Array.from(keys);
-}
-
-async function buildJsonSummary(
-	repoRoot: string,
-	runId: string,
-	workflow: Workflow,
-	orderedJobs: string[],
-): Promise<Record<string, unknown>> {
-	const { readFile } = await import("node:fs/promises");
-	const runFile = path.join(repoRoot, ".xci", "runs", runId, "run.json");
-	const raw = await readFile(runFile, "utf-8");
-	const run = JSON.parse(raw) as {
-		jobs: {
-			jobId: string;
-			status: string;
-			exitCode?: number;
-			durationMs?: number;
-		}[];
-		logDir?: string;
-		artifactDir?: string;
-	};
-
-	return {
-		runId,
-		workflow: {
-			id: workflow.id,
-			name: workflow.name,
-			path: workflow.path,
-		},
-		jobs: orderedJobs.map((jobId) => {
-			const job = run.jobs.find((item) => item.jobId === jobId);
-			return {
-				jobId,
-				status: job?.status ?? "unknown",
-				exitCode: job?.exitCode,
-				durationMs: job?.durationMs,
-			};
-		}),
-		logsDir: run.logDir,
-		artifactsDir: run.artifactDir,
-	};
-}
-
-function resolvePlatformMap(
-	workflow: Workflow,
-	jobIds: string[],
-	imageMap: Record<string, string>,
-	platformMap: Record<string, string>,
-): { map: Record<string, string>; inferredLabels: string[] } {
-	const defaultImage = "ghcr.io/catthehacker/ubuntu:act-latest";
-	const inferred: Record<string, string> = {};
-	const inferredLabels: string[] = [];
-	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
-
-	for (const jobId of jobIds) {
-		const runsOn = jobMap.get(jobId)?.runsOn;
-		if (!runsOn) {
-			continue;
-		}
-		for (const label of parseRunsOnLabels(runsOn)) {
-			if (imageMap[label] || platformMap[label] || inferred[label]) {
-				continue;
-			}
-			if (!isLinuxRunnerLabel(label)) {
-				continue;
-			}
-			inferred[label] = defaultImage;
-			inferredLabels.push(label);
-		}
-	}
-
-	const merged = { ...inferred, ...imageMap, ...platformMap };
-	if (Object.keys(merged).length > 0) {
-		return { map: merged, inferredLabels };
-	}
-
-	return {
-		map: {
-			"ubuntu-latest": defaultImage,
-		},
-		inferredLabels: ["ubuntu-latest"],
-	};
-}
-
-function parseRunsOnLabels(runsOn: string): string[] {
-	return runsOn
-		.split(",")
-		.map((value) => value.trim())
-		.filter(Boolean);
-}
-
-function resolveUnrunnableJobs(
-	workflow: Workflow,
-	jobIds: string[],
-	platformMap: Record<string, string>,
-): Map<string, string> {
-	const jobMap = new Map(workflow.jobs.map((job) => [job.id, job]));
-	const selected = new Set(jobIds);
-	const normalizedMappings = new Set(Object.keys(platformMap).map((value) => value.toLowerCase()));
-	const reasons = new Map<string, string>();
-
-	for (const jobId of jobIds) {
-		const job = jobMap.get(jobId);
-		if (!job) {
-			continue;
-		}
-		if (!job.runsOn) {
-			reasons.set(jobId, "missing runs-on configuration");
-			continue;
-		}
-		const labels = parseRunsOnLabels(job.runsOn);
-		const unsupported = labels.filter((label) => {
-			const normalized = label.toLowerCase();
-			if (normalizedMappings.has(normalized)) {
-				return false;
-			}
-			if (isLinuxRunnerLabel(normalized)) {
-				return false;
-			}
-			return true;
-		});
-		if (unsupported.length > 0) {
-			reasons.set(jobId, `unsupported runner labels: ${unsupported.join(", ")}`);
-		}
-	}
-
-	let changed = true;
-	while (changed) {
-		changed = false;
-		for (const jobId of jobIds) {
-			if (reasons.has(jobId)) {
-				continue;
-			}
-			const job = jobMap.get(jobId);
-			if (!job) {
-				continue;
-			}
-			const blockingNeeds = job.needs.filter((need) => selected.has(need) && reasons.has(need));
-			if (blockingNeeds.length > 0) {
-				reasons.set(jobId, `depends on skipped job(s): ${blockingNeeds.join(", ")}`);
-				changed = true;
-			}
-		}
-	}
-
-	return reasons;
-}
-
-function isLinuxRunnerLabel(label: string): boolean {
-	const value = label.toLowerCase();
-	if (value === "linux" || value === "ubuntu") {
-		return true;
-	}
-	return value.startsWith("ubuntu-");
-}
-
-function resolveContainerArchitecture(configured: string | undefined): string | undefined {
-	if (configured && configured !== "auto") {
-		return configured;
-	}
-
-	switch (process.arch) {
-		case "arm64":
-			return "arm64";
-		case "x64":
-			return "amd64";
-		default:
-			return undefined;
-	}
-}
-
-function resolveSupportedEvents(workflow: Workflow): string[] {
-	if (workflow.events.length > 0) {
-		return workflow.events;
-	}
-	return ["push", "pull_request", "workflow_dispatch"];
-}
-
-async function runWithInk(
-	adapter: EngineAdapter,
-	plan: RunPlan,
-	context: EngineContext,
-	workflow: Workflow,
-	runStoreBase: string,
-): Promise<EngineRunResult> {
-	return new Promise((resolve) => {
-		let resolved = false;
-		let finalResult: EngineRunResult | null = null;
-		const handleComplete = (result: EngineRunResult): void => {
-			if (resolved) {
-				return;
-			}
-			finalResult = result;
-		};
-
-		const { waitUntilExit, unmount } = render(
-			React.createElement(RunView, {
-				adapter,
-				context,
-				plan,
-				workflow,
-				runStoreBase,
-				onComplete: handleComplete,
-			}),
-		);
-
-		waitUntilExit().then(() => {
-			unmount();
-			if (resolved) {
-				return;
-			}
-			resolved = true;
-			resolve(finalResult ?? { exitCode: 1, logsPath: "" });
-		});
-	});
 }

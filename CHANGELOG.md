@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-02-05
+
+### Added
+- Add engine adapter factory selection from config and event-driven run persistence wiring.
+- Add stronger security hardening for path safety and CLI argument redaction.
+- Add Vitest baseline coverage across core, CLI, config, adapter, and packaged CLI smoke flows.
+- Add docs for architecture, testing workflow, and exit codes.
+
+### Changed
+- Refactor CLI run orchestration into focused modules (`select`, `plan-run`, `execute-run`, `output`).
+- Improve TUI run-view log parsing/rendering with incremental updates and clearer help states.
+- Expand CI quality gates with format check, tests, packaged smoke checks, and pre-commit lint-staged hooks.
+
+### Fixed
+- Harden core/engine validation and act process error handling for more deterministic exits.
+
 ## [0.1.6] - 2026-02-04
 
 ### Added

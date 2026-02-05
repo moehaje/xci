@@ -25,8 +25,6 @@ export function formatHelpText({
 		return "Tab: switch view · D: details · S: summary · Q: exit";
 	}
 	const paneHint =
-		focusedPane === "jobs"
-			? "Left/Right: focus pane (jobs)"
-			: "Left/Right: focus pane (steps)";
+		focusedPane === "jobs" ? "Left/Right: focus pane (jobs)" : "Left/Right: focus pane (steps)";
 	return `${paneHint} · Up/Down: move · Space/Enter: toggle step · Tab: switch view · S: summary · Q: exit`;
 }

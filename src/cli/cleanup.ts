@@ -62,7 +62,14 @@ export function cleanupRuntime(
 }
 
 function listActContainers(engine: "docker" | "podman"): { id: string; status: string }[] {
-	const result = run(engine, ["ps", "-a", "--filter", "name=^act-", "--format", "{{.ID}}\t{{.Status}}"]);
+	const result = run(engine, [
+		"ps",
+		"-a",
+		"--filter",
+		"name=^act-",
+		"--format",
+		"{{.ID}}\t{{.Status}}",
+	]);
 	if (!result.ok || !result.stdout) {
 		return [];
 	}

@@ -89,7 +89,9 @@ export function parseArgs(argv: string[]): CliOptions {
 						if (normalized) {
 							options.cleanupMode = normalized;
 						} else {
-							options.errors?.push(`Invalid value for --cleanup-mode: ${value} (expected off|fast|full)`);
+							options.errors?.push(
+								`Invalid value for --cleanup-mode: ${value} (expected off|fast|full)`,
+							);
 						}
 					}
 				}
@@ -126,7 +128,9 @@ export function printHelp(): void {
 	process.stdout.write(`  --preset <name>       Preset id\n`);
 	process.stdout.write(`  --no-cleanup          Disable post-run act cleanup\n`);
 	process.stdout.write(`  --cleanup-mode <m>    Cleanup mode: off|fast|full\n`);
-	process.stdout.write(`  --full                For cleanup command, remove act images/toolcache too\n`);
+	process.stdout.write(
+		`  --full                For cleanup command, remove act images/toolcache too\n`,
+	);
 	process.stdout.write(`  --json                Print JSON summary\n`);
 	process.stdout.write(`  -h, --help            Show help\n`);
 	process.stdout.write(`  -v, --version         Show version\n`);

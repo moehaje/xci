@@ -1,6 +1,6 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import type {
 	EngineAdapter,
 	EngineCapabilities,
@@ -23,7 +23,11 @@ export class ActAdapter implements EngineAdapter {
 	}
 
 	async plan(context: EngineContext, plan: RunPlan): Promise<RunPlan> {
-		const eventPayloadPath = ensureEventPayload(plan.event.name, context.eventPayloadPath, context.runDir);
+		const eventPayloadPath = ensureEventPayload(
+			plan.event.name,
+			context.eventPayloadPath,
+			context.runDir,
+		);
 		const plannedJobs = plan.jobs.map((job) => ({
 			...job,
 			engineArgs: buildActArgs(

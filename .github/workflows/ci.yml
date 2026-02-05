@@ -3,8 +3,24 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - "VERSIONING.md"
+      - "docs/**"
+      - ".docs/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "CHANGELOG.md"
+      - "CODE_OF_CONDUCT.md"
+      - "SECURITY.md"
+      - "VERSIONING.md"
+      - "docs/**"
+      - ".docs/**"
 
 jobs:
   build:
@@ -20,15 +36,13 @@ jobs:
         run: npm install
       - name: Build
         run: npm run build
+      - name: Format check
+        run: npm run format:check
       - name: Lint
         run: npm run lint
       - name: Type check
         run: npm run type-check
+      - name: Test
+        run: npm test
       - name: Packed CLI smoke test
-        run: |
-          TARBALL="$(npm pack --silent)"
-          PREFIX="$(mktemp -d)"
-          npm install --prefix "$PREFIX" "$TARBALL"
-          "$PREFIX/node_modules/.bin/xci" --version
-          "$PREFIX/node_modules/.bin/xci" --help | grep -q "run"
-          rm -f "$TARBALL"
+        run: npm run smoke:packaged

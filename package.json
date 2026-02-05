@@ -54,11 +54,19 @@
 		"build": "npm run clean && tsc -p tsconfig.json && node scripts/ensure-shebang.js",
 		"dev": "tsx src/index.ts",
 		"format": "biome format --write .",
+		"format:check": "biome format .",
 		"lint": "biome lint .",
+		"prepare": "husky",
 		"prepack": "npm run build",
 		"release:homebrew-metadata": "node scripts/homebrew-metadata.js --formula",
+		"smoke:packaged": "node scripts/smoke-packaged-cli.js",
 		"test": "vitest run",
 		"type-check": "tsc -p tsconfig.json --noEmit"
+	},
+	"lint-staged": {
+		"*.{ts,tsx,js,mjs,cjs,json,yml,yaml,md}": [
+			"biome check --write --no-errors-on-unmatched"
+		]
 	},
 	"dependencies": {
 		"@clack/prompts": "^0.7.0",
@@ -72,6 +80,8 @@
 		"@types/node": "^20.14.10",
 		"@types/react": "^18.3.1",
 		"@types/react-dom": "^18.3.0",
+		"husky": "^9.1.7",
+		"lint-staged": "^16.2.7",
 		"tsx": "^4.7.0",
 		"typescript": "^5.3.3",
 		"vitest": "^4.0.18"

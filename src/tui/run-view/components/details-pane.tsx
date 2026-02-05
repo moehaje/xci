@@ -68,7 +68,10 @@ export function DetailsPane({
 					<Text dimColor>│</Text>
 					{Array.from(
 						{
-							length: Math.max(orderedJobs.length, selectedSteps.length + (selectedSteps.length === 0 ? 4 : 3)),
+							length: Math.max(
+								orderedJobs.length,
+								selectedSteps.length + (selectedSteps.length === 0 ? 4 : 3),
+							),
 						},
 						(_, rowIndex) => `divider-${rowIndex + 1}`,
 					).map((dividerKey) => (

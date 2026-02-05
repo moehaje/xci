@@ -236,12 +236,7 @@ export function parseStepChunk(parser: StepChunkParser, chunk: string): StepChun
 			const key = normalizeStepName(successMatch[1]);
 			const index =
 				parser.lastIndexForName.get(key) ??
-				resolveIndex(
-					key,
-					parser.nameToIndices,
-					parser.nameToCursor,
-					parser.lastIndexForName,
-				);
+				resolveIndex(key, parser.nameToIndices, parser.nameToCursor, parser.lastIndexForName);
 			if (index !== undefined) {
 				statusMap[parser.steps[index].id] = "success";
 				if (parser.currentIndex === index) {
@@ -256,12 +251,7 @@ export function parseStepChunk(parser: StepChunkParser, chunk: string): StepChun
 			const key = normalizeStepName(failureMatch[1]);
 			const index =
 				parser.lastIndexForName.get(key) ??
-				resolveIndex(
-					key,
-					parser.nameToIndices,
-					parser.nameToCursor,
-					parser.lastIndexForName,
-				);
+				resolveIndex(key, parser.nameToIndices, parser.nameToCursor, parser.lastIndexForName);
 			if (index !== undefined) {
 				statusMap[parser.steps[index].id] = "failed";
 				parser.lastIndexForName.set(key, index);

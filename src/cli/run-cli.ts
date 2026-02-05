@@ -12,8 +12,14 @@ import {
 	sortJobsByNeeds,
 } from "../core/plan.js";
 import type { Workflow } from "../core/types.js";
-import { executeRun } from "./execute-run.js";
 import { createEngineAdapter } from "../engines/factory.js";
+import { createRunEventPersister, RunStore } from "../store/run-store.js";
+import type { CliOptions } from "./args.js";
+import { parseArgs, printHelp, readPackageVersion } from "./args.js";
+import { type CleanupMode, cleanupRuntime } from "./cleanup.js";
+import { executeRun } from "./execute-run.js";
+import { ensureGitignore, runInit } from "./init.js";
+import { prepareInputFiles } from "./inputs.js";
 import { buildJsonSummary } from "./output.js";
 import {
 	resolveContainerArchitecture,
@@ -22,6 +28,7 @@ import {
 	resolveSupportedEvents,
 	resolveUnrunnableJobs,
 } from "./plan-run.js";
+import { runPreflightChecks } from "./preflight.js";
 import {
 	collectMatrixKeys,
 	promptMatrix,
@@ -31,13 +38,6 @@ import {
 	selectJobs,
 	selectPreset,
 } from "./select.js";
-import { createRunEventPersister, RunStore } from "../store/run-store.js";
-import type { CliOptions } from "./args.js";
-import { parseArgs, printHelp, readPackageVersion } from "./args.js";
-import { cleanupRuntime, type CleanupMode } from "./cleanup.js";
-import { ensureGitignore, runInit } from "./init.js";
-import { prepareInputFiles } from "./inputs.js";
-import { runPreflightChecks } from "./preflight.js";
 
 const XCI_ASCII_LINES = [
 	"██╗  ██╗ ██████╗██╗",
@@ -84,7 +84,11 @@ export async function runCli(): Promise<void> {
 	if (args.command === "cleanup") {
 		const repoRoot = process.cwd();
 		const { config } = loadConfig(repoRoot);
-		const cleanupMode = resolveCleanupMode(config.runtime.cleanupMode, config.runtime.cleanup, args);
+		const cleanupMode = resolveCleanupMode(
+			config.runtime.cleanupMode,
+			config.runtime.cleanup,
+			args,
+		);
 		const mode = args.full ? "full" : cleanupMode;
 		const summary = cleanupRuntime(config.runtime.container, mode);
 		process.stdout.write(
@@ -360,7 +364,11 @@ function resolveCleanupMode(
 		return "off";
 	}
 	if (options.cleanupMode) {
-		if (options.cleanupMode === "off" || options.cleanupMode === "fast" || options.cleanupMode === "full") {
+		if (
+			options.cleanupMode === "off" ||
+			options.cleanupMode === "fast" ||
+			options.cleanupMode === "full"
+		) {
 			return options.cleanupMode;
 		}
 	}

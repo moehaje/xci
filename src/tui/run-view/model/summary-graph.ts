@@ -142,7 +142,9 @@ function computeDepths(
 		const job = workflowJobById.get(jobId);
 		const selectedNeeds = (job?.needs ?? []).filter((need) => selectedJobIds.has(need));
 		const depth =
-			selectedNeeds.length === 0 ? 0 : Math.max(...selectedNeeds.map((need) => resolveDepth(need))) + 1;
+			selectedNeeds.length === 0
+				? 0
+				: Math.max(...selectedNeeds.map((need) => resolveDepth(need))) + 1;
 		depths.set(jobId, depth);
 		visiting.delete(jobId);
 		return depth;

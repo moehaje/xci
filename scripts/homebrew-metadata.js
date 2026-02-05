@@ -53,9 +53,7 @@ function printHelp() {
 }
 
 function packageNameToClassName(packageName) {
-	const baseName = packageName.includes("/")
-		? packageName.split("/").at(-1)
-		: packageName;
+	const baseName = packageName.includes("/") ? packageName.split("/").at(-1) : packageName;
 	return baseName
 		.split(/[^a-zA-Z0-9]+/)
 		.filter(Boolean)

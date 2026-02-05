@@ -1,8 +1,6 @@
 import { Box, Text } from "ink";
 import type { RunStatus } from "../../../core/types.js";
 import type { CardNode, SummaryGraph } from "../model/summary-graph.js";
-import { formatDuration } from "../utils/format.js";
-import { colorForStatus } from "../utils/status.js";
 import {
 	type Canvas,
 	type CanvasStyle,
@@ -11,6 +9,8 @@ import {
 	drawEdges,
 	drawPort,
 } from "../render/summary-connectors.js";
+import { formatDuration } from "../utils/format.js";
+import { colorForStatus } from "../utils/status.js";
 
 const CARD_WIDTH = 34;
 const CARD_GAP_Y = 1;
@@ -315,7 +315,12 @@ function findLastContentIndex(row: Canvas["cells"][number]): number {
 		if ((cell?.char ?? " ") !== " ") {
 			return i;
 		}
-		if (cell?.style?.backgroundColor || cell?.style?.color || cell?.style?.bold || cell?.style?.dim) {
+		if (
+			cell?.style?.backgroundColor ||
+			cell?.style?.color ||
+			cell?.style?.bold ||
+			cell?.style?.dim
+		) {
 			return i;
 		}
 	}
@@ -326,7 +331,12 @@ function styleToKey(style?: CanvasStyle): string {
 	if (!style) {
 		return "none";
 	}
-	return [style.color ?? "", style.dim ? "1" : "0", style.backgroundColor ?? "", style.bold ? "1" : "0"].join("|");
+	return [
+		style.color ?? "",
+		style.dim ? "1" : "0",
+		style.backgroundColor ?? "",
+		style.bold ? "1" : "0",
+	].join("|");
 }
 
 function padWithRightLabel(left: string, right: string, width: number): string {

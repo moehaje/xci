@@ -12,7 +12,6 @@ import { SummaryPane } from "./components/summary-pane.js";
 import { buildSummaryGraph } from "./model/summary-graph.js";
 import type { DiagramLine } from "./render/diagram.js";
 import { buildDiagramLines } from "./render/diagram.js";
-import { formatHelpText } from "./utils/help.js";
 import {
 	DEFAULT_VIEW,
 	LOG_TAIL_LINES,
@@ -20,6 +19,7 @@ import {
 	SPINNER_FRAMES,
 	SUMMARY_GRAPH_MIN_WIDTH,
 } from "./utils/constants.js";
+import { formatHelpText } from "./utils/help.js";
 import {
 	createStepChunkParser,
 	mergeStepOutputs,
@@ -200,7 +200,9 @@ export function RunView({
 			abortControllerRef.current = null;
 			setCancelingRun(false);
 			setQuitPromptVisible(false);
-			setStatusText(result.exitCode === 0 ? "success" : result.exitCode === 130 ? "canceled" : "failed");
+			setStatusText(
+				result.exitCode === 0 ? "success" : result.exitCode === 130 ? "canceled" : "failed",
+			);
 			onComplete(result);
 		};
 

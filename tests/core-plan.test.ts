@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	expandJobIdsWithNeeds,
-	filterJobsForEvent,
-	sortJobsByNeeds,
-} from "../src/core/plan.js";
+import { expandJobIdsWithNeeds, filterJobsForEvent, sortJobsByNeeds } from "../src/core/plan.js";
 import type { Workflow } from "../src/core/types.js";
 
 const workflow: Workflow = {

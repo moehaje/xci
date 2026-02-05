@@ -228,7 +228,9 @@ async function ensureImagesAvailable(
 	for (const image of missing) {
 		const pulled = await pullImage(engine, image);
 		if (!pulled) {
-			process.stderr.write(`Failed to pull ${image} with ${engine}. Install/pull it manually and retry.\n`);
+			process.stderr.write(
+				`Failed to pull ${image} with ${engine}. Install/pull it manually and retry.\n`,
+			);
 			return false;
 		}
 	}

@@ -104,7 +104,13 @@ export function drawEdges(
 	}
 }
 
-export function drawPort(canvas: Canvas, x: number, y: number, status: RunStatus, spinnerIndex: number): void {
+export function drawPort(
+	canvas: Canvas,
+	x: number,
+	y: number,
+	status: RunStatus,
+	spinnerIndex: number,
+): void {
 	if (!isInBounds(canvas, x, y)) {
 		return;
 	}

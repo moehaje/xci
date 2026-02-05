@@ -1,6 +1,6 @@
 import { cancel, isCancel, multiselect, select, text } from "@clack/prompts";
-import type { CliOptions } from "./args.js";
 import type { RunPreset, Workflow } from "../core/types.js";
+import type { CliOptions } from "./args.js";
 
 export function resolveWorkflow(workflows: Workflow[], selector?: string): Workflow | undefined {
 	if (!selector) {
@@ -35,7 +35,10 @@ export async function selectEvent(defaultEvent: string, events: string[]): Promi
 	return selection;
 }
 
-export async function selectPreset(presets: RunPreset[], current: string): Promise<RunPreset | null> {
+export async function selectPreset(
+	presets: RunPreset[],
+	current: string,
+): Promise<RunPreset | null> {
 	const selection = await select({
 		message: "Select a preset",
 		initialValue: current,

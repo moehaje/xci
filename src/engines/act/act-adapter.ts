@@ -8,6 +8,7 @@ import type {
 	EngineRunResult,
 } from "../../core/engine.js";
 import type { RunPlan } from "../../core/types.js";
+import { getJobLogFileName } from "../../store/run-store.js";
 
 export class ActAdapter implements EngineAdapter {
 	readonly id = "act";
@@ -79,7 +80,8 @@ export class ActAdapter implements EngineAdapter {
 				break;
 			}
 			const logsPath =
-				context.jobLogPathFor?.(job.jobId) ?? path.join(context.logsDir, `${job.jobId}.log`);
+				context.jobLogPathFor?.(job.jobId) ??
+				path.join(context.logsDir, getJobLogFileName(job.jobId));
 			lastLogsPath = logsPath;
 
 			const engineArgs = job.engineArgs;
@@ -335,6 +337,17 @@ function runAct(
 			}
 			finish(signal?.aborted ? 130 : (code ?? 1));
 		});
+
+		child.on("error", (error: NodeJS.ErrnoException) => {
+			const hint = formatSpawnError(command, error);
+			logStream.write(hint);
+			if (onOutput) {
+				onOutput(hint, "stderr", jobId);
+			} else {
+				process.stderr.write(hint);
+			}
+			finish(1);
+		});
 	});
 }
 
@@ -377,6 +390,17 @@ function looksLikeDockerStorageError(text: string): boolean {
 		text.includes("Error response from daemon") &&
 		(text.includes("input/output error") || text.includes("I/O error"))
 	);
+}
+
+function formatSpawnError(command: string, error: NodeJS.ErrnoException): string {
+	const code = error.code ?? "UNKNOWN";
+	if (code === "ENOENT") {
+		return `XCI error: failed to start "${command}" (ENOENT). Ensure it is installed and on PATH.\n`;
+	}
+	if (code === "EACCES") {
+		return `XCI error: failed to execute "${command}" (EACCES). Check executable permissions.\n`;
+	}
+	return `XCI error: failed to spawn "${command}" (${code}): ${error.message}\n`;
 }
 
 type ActOutputFormatter = {

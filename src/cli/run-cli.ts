@@ -174,6 +174,13 @@ export async function runCli(): Promise<void> {
 	const preset = presets.find((item) => item.id === presetId) ?? presets[0];
 
 	const effectiveEvent = args.event ?? preset?.event?.name ?? eventName;
+	if (!supportedEvents.includes(effectiveEvent)) {
+		process.stderr.write(
+			`Event "${effectiveEvent}" is not enabled for this workflow. Use --event with one of: ${supportedEvents.join(", ")}.\n`,
+		);
+		process.exitCode = 2;
+		return;
+	}
 	const availableJobs = filterJobsForEvent(workflow.jobs, effectiveEvent);
 
 	let selectedJobs = resolveJobsFromArgs(args, preset);
@@ -341,8 +348,7 @@ export async function runCli(): Promise<void> {
 			process.stderr.write(`${cleanupSummary.errors.join("\n")}\n`);
 		}
 	}
-	const shouldTreatInteractiveCancelAsSuccess = isTty && !args.json && result.exitCode === 130;
-	process.exitCode = shouldTreatInteractiveCancelAsSuccess ? 0 : result.exitCode;
+	process.exitCode = result.exitCode;
 }
 
 function resolveCleanupMode(

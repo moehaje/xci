@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import type { EngineRuntimeEvent } from "../core/engine.js";
 import type { RunRecord } from "../core/types.js";
 
@@ -14,7 +15,7 @@ export class RunStore {
 
 	createRunDir(runId: string): string {
 		this.ensureBaseDir();
-		const runDir = path.join(this.baseDir, runId);
+		const runDir = safeJoin(this.baseDir, runId, "run id");
 		fs.mkdirSync(runDir, { recursive: true });
 		return runDir;
 	}
@@ -35,7 +36,7 @@ export class RunStore {
 
 	createLogFile(runId: string, jobId: string): string {
 		const logsDir = this.createLogsDir(runId);
-		return path.join(logsDir, `${jobId}.log`);
+		return safeJoin(logsDir, getJobLogFileName(jobId), "job log file");
 	}
 
 	writeRun(run: RunRecord): void {
@@ -45,6 +46,18 @@ export class RunStore {
 		const recordPath = path.join(runDir, "run.json");
 		fs.writeFileSync(recordPath, JSON.stringify(run, null, 2));
 	}
+}
+
+export function getJobLogFileName(jobId: string): string {
+	const normalized = jobId
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9._-]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 64);
+	const hash = crypto.createHash("sha1").update(jobId).digest("hex").slice(0, 8);
+	const base = normalized.length > 0 ? normalized : "job";
+	return `${base}-${hash}.log`;
 }
 
 export function createRunEventPersister(runStore: RunStore): (event: EngineRuntimeEvent) => void {
@@ -124,4 +137,14 @@ export function createRunEventPersister(runStore: RunStore): (event: EngineRunti
 				return;
 		}
 	};
+}
+
+function safeJoin(baseDir: string, child: string, label: string): string {
+	const base = path.resolve(baseDir);
+	const resolved = path.resolve(base, child);
+	const rel = path.relative(base, resolved);
+	if (rel.startsWith("..") || path.isAbsolute(rel)) {
+		throw new Error(`Invalid ${label}: path escapes run store base directory`);
+	}
+	return resolved;
 }

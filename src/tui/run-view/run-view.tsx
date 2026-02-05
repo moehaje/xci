@@ -4,6 +4,7 @@ import { Box, Text, useApp, useInput, useStdout } from "ink";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EngineAdapter, EngineContext, EngineRunResult } from "../../core/engine.js";
 import type { Job, RunPlan, RunRecord, RunStatus, Workflow } from "../../core/types.js";
+import { getJobLogFileName } from "../../store/run-store.js";
 import type { DetailsPaneFocus } from "./components/details-pane.js";
 import { DetailsPane } from "./components/details-pane.js";
 import { estimateSummaryGraphWidth } from "./components/summary-graph-view.js";
@@ -282,7 +283,7 @@ export function RunView({
 			}
 			return;
 		}
-		const logPath = path.join(runRecord.logDir, `${currentJob.jobId}.log`);
+		const logPath = path.join(runRecord.logDir, getJobLogFileName(currentJob.jobId));
 		const interval = setInterval(() => {
 			if (logReadInFlight.current) {
 				return;

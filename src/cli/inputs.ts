@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import path from "node:path";
+import { ensureWithinBase } from "../utils/path-safety.js";
 
 export type InputFileResult = {
 	ok: boolean;
@@ -19,7 +19,7 @@ export type InputConfig = {
 };
 
 export function prepareInputFiles(runDir: string, config: InputConfig): InputFileResult {
-	const inputsDir = path.join(runDir, "inputs");
+	const inputsDir = ensureWithinBase(runDir, "inputs", "inputs dir");
 	fs.mkdirSync(inputsDir, { recursive: true });
 
 	const envFile = buildInputFile(inputsDir, "env", config.envFile, config.env);
@@ -63,7 +63,8 @@ function buildInputFile(
 		if (!fs.existsSync(sourcePath)) {
 			return { ok: false, error: `Configured ${label} file not found: ${sourcePath}` };
 		}
-		const raw = fs.readFileSync(sourcePath, "utf-8");
+		const resolved = ensureWithinBase(process.cwd(), sourcePath, `${label} file`);
+		const raw = fs.readFileSync(resolved, "utf-8");
 		content = raw.endsWith("\n") || raw.length === 0 ? raw : `${raw}\n`;
 	}
 
@@ -71,9 +72,9 @@ function buildInputFile(
 		content += serializeKeyValues(entries);
 	}
 
-	const outPath = path.join(inputsDir, `${label}.env`);
-	fs.writeFileSync(outPath, content);
-	return { ok: true, path: outPath };
+	const safePath = ensureWithinBase(inputsDir, `${label}.env`, `${label} file`);
+	fs.writeFileSync(safePath, content);
+	return { ok: true, path: safePath };
 }
 
 function serializeKeyValues(entries: Record<string, string>): string {

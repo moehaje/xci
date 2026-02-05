@@ -9,6 +9,7 @@ import type {
 } from "../../core/engine.js";
 import type { RunPlan } from "../../core/types.js";
 import { getJobLogFileName } from "../../store/run-store.js";
+import { redactArgs } from "../../utils/redact.js";
 
 export class ActAdapter implements EngineAdapter {
 	readonly id = "act";
@@ -356,31 +357,11 @@ function runAct(
 }
 
 function formatActCommand(args: string[]): string {
-	const redacted = redactActArgs(args);
+	const redacted = redactArgs(args);
 	return redacted.map(quoteArg).join(" ");
 }
 
-function redactActArgs(args: string[]): string[] {
-	const redacted = [...args];
-	const redactNext = new Set(["--secret-file", "--env-file", "--var-file"]);
-
-	for (let i = 0; i < redacted.length; i += 1) {
-		const current = redacted[i];
-		if (redactNext.has(current) && i + 1 < redacted.length) {
-			redacted[i + 1] = "<redacted>";
-			i += 1;
-			continue;
-		}
-		for (const flag of redactNext) {
-			if (current.startsWith(`${flag}=`)) {
-				redacted[i] = `${flag}=<redacted>`;
-				break;
-			}
-		}
-	}
-
-	return redacted;
-}
+// redactActArgs removed; use utils/redact.
 
 function quoteArg(value: string): string {
 	if (/[\s"'\\]/.test(value)) {

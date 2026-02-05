@@ -15,6 +15,23 @@ XCI is a local GitHub Actions runner UX for running workflows locally with a pol
 - Local runs via `act` with Docker/Podman
 - Run history and logs under `.xci/runs/<run-id>/`
 
+## Architecture
+
+XCI is built as a small set of layers with strict dependency direction:
+
+```
+core -> engine + store -> cli + tui
+```
+
+Key modules:
+- `src/core/`: workflow discovery + parsing
+- `src/engines/`: engine adapters (v1: act)
+- `src/store/`: run persistence
+- `src/cli/`: CLI wiring and non-interactive usage
+- `src/tui/`: Ink UI rendering
+
+See `docs/architecture.md` for details.
+
 ## Demo
 
 ![XCI demo placeholder](.github/assets/xci-demo.gif)
@@ -110,6 +127,11 @@ npm install
 npm run build
 npm run type-check
 ```
+
+Docs:
+- `docs/architecture.md`
+- `docs/testing.md`
+- `docs/exit-codes.md`
 
 ## License
 

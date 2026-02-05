@@ -1,4 +1,4 @@
-name: Update Homebrew Tap
+name: Release
 
 on:
   release:
@@ -9,13 +9,191 @@ on:
         description: npm version to publish into the tap formula (defaults to npm dist-tag latest)
         required: false
         type: string
+      tag:
+        description: tag to release (e.g. v0.1.6) when running manually
+        required: false
+        type: string
+      release_name:
+        description: release title (defaults to tag)
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  publish-npm:
+    if: github.repository == 'moehaje/xci' && github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout xci
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
+
+  create-github-release:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout xci
+        uses: actions/checkout@v4
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag }}"
+          TITLE="${{ github.event.inputs.release_name }}"
+          if [ -z "${TITLE}" ]; then
+            TITLE="${TAG}"
+          fi
+          VERSION="${TAG#v}"
+          NOTES_FILE="$(mktemp)"
+          awk -v version="${VERSION}" '
+            $0 ~ "^## \\[" version "\\]" { found=1; next }
+            found && $0 ~ "^## \\[" { exit }
+            found { print }
+          ' CHANGELOG.md | sed -e '1{/^$/d;}' > "${NOTES_FILE}"
+
+          if [ ! -s "${NOTES_FILE}" ]; then
+            echo "No CHANGELOG section found for ${VERSION}. Falling back to generate-notes."
+            gh release view "${TAG}" >/dev/null 2>&1 || \
+              gh release create "${TAG}" --title "${TITLE}" --generate-notes
+            exit 0
+          fi
+
+          gh release view "${TAG}" >/dev/null 2>&1 || \
+            gh release create "${TAG}" --title "${TITLE}" --notes-file "${NOTES_FILE}"
+
   update-tap-formula:
-    if: github.repository == 'moehaje/xci'
+    if: github.repository == 'moehaje/xci' && github.event_name == 'release'
+    needs:
+      - publish-npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout xci
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve Homebrew metadata
+        id: metadata
+        run: |
+          set -euo pipefail
+
+          VERSION_INPUT="${{ github.event.inputs.version }}"
+          VERSION_ARG=""
+          if [ -n "${VERSION_INPUT}" ]; then
+            VERSION_ARG="--version ${VERSION_INPUT}"
+          fi
+
+          ATTEMPTS=12
+          SLEEP_SECONDS=10
+          for attempt in $(seq 1 "${ATTEMPTS}"); do
+            if node scripts/homebrew-metadata.js --json ${VERSION_ARG} > homebrew-metadata.json; then
+              break
+            fi
+
+            if [ "${attempt}" -eq "${ATTEMPTS}" ]; then
+              echo "Failed to resolve homebrew metadata after ${ATTEMPTS} attempts."
+              exit 1
+            fi
+
+            echo "Metadata not ready yet (attempt ${attempt}/${ATTEMPTS}); retrying in ${SLEEP_SECONDS}s..."
+            sleep "${SLEEP_SECONDS}"
+          done
+
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+
+          const metadata = JSON.parse(fs.readFileSync("homebrew-metadata.json", "utf8"));
+          const output = process.env.GITHUB_OUTPUT;
+
+          fs.appendFileSync(output, `version=${metadata.version}\n`);
+          fs.appendFileSync(output, `tarball_url=${metadata.tarballUrl}\n`);
+          fs.appendFileSync(output, `sha256=${metadata.sha256}\n`);
+          NODE
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: moehaje/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Write Formula/xci.rb
+        run: |
+          cat > homebrew-tap/Formula/xci.rb <<EOF
+          class Xci < Formula
+            desc "Local GitHub Actions runner UX powered by act"
+            homepage "https://github.com/moehaje/xci#readme"
+            url "${{ steps.metadata.outputs.tarball_url }}"
+            sha256 "${{ steps.metadata.outputs.sha256 }}"
+            license "MIT"
+
+            depends_on "act"
+            depends_on "node"
+
+            def install
+              system "npm", "install", *std_npm_args
+              bin.install_symlink libexec.glob("bin/*")
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/xci --version")
+              assert_match "run", shell_output("#{bin}/xci --help")
+            end
+          end
+          EOF
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if git -C homebrew-tap diff --quiet -- Formula/xci.rb; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Commit and push tap formula
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add Formula/xci.rb
+          git -C homebrew-tap commit -m "chore(xci): update formula to v${{ steps.metadata.outputs.version }}"
+          git -C homebrew-tap push origin HEAD:main
+
+      - name: No-op when formula is current
+        if: steps.changes.outputs.changed != 'true'
+        run: echo "Formula already up to date."
+
+  update-tap-formula-manual:
+    if: github.repository == 'moehaje/xci' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout xci

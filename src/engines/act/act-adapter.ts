@@ -7,8 +7,7 @@ import type {
 	EngineContext,
 	EngineRunResult,
 } from "../../core/engine.js";
-import type { JobRun, RunPlan, RunRecord } from "../../core/types.js";
-import { RunStore } from "../../store/run-store.js";
+import type { RunPlan } from "../../core/types.js";
 
 export class ActAdapter implements EngineAdapter {
 	readonly id = "act";
@@ -23,13 +22,25 @@ export class ActAdapter implements EngineAdapter {
 	}
 
 	async plan(context: EngineContext, plan: RunPlan): Promise<RunPlan> {
+		const eventPayloadPath = ensureEventPayload(plan.event.name, context.eventPayloadPath, context.runDir);
 		const plannedJobs = plan.jobs.map((job) => ({
 			...job,
-			engineArgs: buildActArgs(context, job.jobId, job.matrix ?? null),
+			engineArgs: buildActArgs(
+				{
+					...context,
+					eventPayloadPath,
+				},
+				job.jobId,
+				job.matrix ?? null,
+			),
 		}));
 
 		return {
 			...plan,
+			event: {
+				...plan.event,
+				payloadPath: eventPayloadPath,
+			},
 			jobs: plannedJobs,
 		};
 	}
@@ -39,43 +50,48 @@ export class ActAdapter implements EngineAdapter {
 			return { exitCode: 1, logsPath: "" };
 		}
 
-		const store = new RunStore(path.join(context.repoRoot, ".xci", "runs"));
-		const runDir = store.createRunDir(plan.runId);
-		const artifactsDir = store.createArtifactsDir(plan.runId);
-		const logDir = store.createLogsDir(plan.runId);
-		const eventPath = ensureEventPayload(plan.event.name, context.eventPayloadPath, runDir);
-
-		const runRecord = createRunRecord(plan, artifactsDir, logDir);
-		store.writeRun(runRecord);
+		const eventPath = ensureEventPayload(plan.event.name, plan.event.payloadPath, context.runDir);
+		const createdAt = new Date().toISOString();
+		context.onEvent?.({
+			type: "run-started",
+			runId: plan.runId,
+			workflowId: plan.workflow.id,
+			event: {
+				...plan.event,
+				payloadPath: eventPath,
+			},
+			jobs: plan.jobs.map((job) => ({ jobId: job.jobId, matrix: job.matrix ?? null })),
+			artifactDir: context.artifactDir,
+			logDir: context.logsDir,
+			createdAt,
+		});
 
 		let lastLogsPath = "";
 		let exitCode = 0;
+		let hasFailure = false;
+		let hasCanceled = false;
 
 		for (const [index, job] of plan.jobs.entries()) {
 			if (context.signal?.aborted) {
 				exitCode = 130;
-				markRemainingCanceled(runRecord, index);
+				hasCanceled = true;
+				markRemainingCanceled(plan, context, index);
 				break;
 			}
-			const logsPath = store.createLogFile(plan.runId, job.jobId);
+			const logsPath =
+				context.jobLogPathFor?.(job.jobId) ?? path.join(context.logsDir, `${job.jobId}.log`);
 			lastLogsPath = logsPath;
 
-			const engineArgs = buildActArgs(
-				{
-					...context,
-					eventPayloadPath: eventPath,
-					artifactDir: artifactsDir,
-				},
-				job.jobId,
-				job.matrix ?? null,
-			);
+			const engineArgs = job.engineArgs;
+			const startedAt = new Date().toISOString();
+			context.onEvent?.({
+				type: "job-started",
+				runId: plan.runId,
+				jobId: job.jobId,
+				startedAt,
+			});
 
-			const jobRun = runRecord.jobs[index];
-			jobRun.status = "running";
-			jobRun.startedAt = new Date().toISOString();
-			store.writeRun(runRecord);
-
-			const logStream = fs.createWriteStream(logsPath, { flags: "a" });
+			const logStream = fs.createWriteStream(logsPath, { flags: "a", encoding: "utf-8" });
 			exitCode = await runAct(
 				engineArgs,
 				context.repoRoot,
@@ -85,21 +101,35 @@ export class ActAdapter implements EngineAdapter {
 				context.signal,
 			);
 
-			if (exitCode === 130) {
-				finalizeCanceledJobRun(jobRun);
-			} else {
-				finalizeJobRun(jobRun, exitCode);
-			}
-			store.writeRun(runRecord);
+			const finishedAt = new Date().toISOString();
+			const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+			const status = exitCode === 130 ? "canceled" : exitCode === 0 ? "success" : "failed";
+			context.onEvent?.({
+				type: "job-finished",
+				runId: plan.runId,
+				jobId: job.jobId,
+				status,
+				exitCode,
+				startedAt,
+				finishedAt,
+				durationMs,
+			});
 
 			if (exitCode !== 0) {
-				markRemainingCanceled(runRecord, index + 1);
+				hasCanceled = hasCanceled || exitCode === 130;
+				hasFailure = hasFailure || exitCode !== 130;
+				markRemainingCanceled(plan, context, index + 1);
 				break;
 			}
 		}
 
-		finalizeRunRecord(runRecord);
-		store.writeRun(runRecord);
+		const runStatus = hasFailure ? "failed" : hasCanceled ? "canceled" : "success";
+		context.onEvent?.({
+			type: "run-finished",
+			runId: plan.runId,
+			status: runStatus,
+			finishedAt: new Date().toISOString(),
+		});
 
 		return { exitCode, logsPath: lastLogsPath };
 	}
@@ -190,63 +220,16 @@ function buildEventPayload(eventName: string): Record<string, unknown> {
 	}
 }
 
-function createRunRecord(plan: RunPlan, artifactDir: string, logDir: string): RunRecord {
-	const now = new Date().toISOString();
-	return {
-		id: plan.runId,
-		workflowId: plan.workflow.id,
-		event: plan.event,
-		status: "running",
-		createdAt: now,
-		jobs: [
-			...plan.jobs.map((job) => ({
-				jobId: job.jobId,
-				status: "pending" as const,
-				matrix: job.matrix ?? null,
-			})),
-		],
-		artifactDir,
-		logDir,
-	};
-}
-
-function finalizeJobRun(jobRun: JobRun, exitCode: number): void {
-	const finishedAt = new Date().toISOString();
-	const durationMs =
-		new Date(finishedAt).getTime() - new Date(jobRun.startedAt ?? finishedAt).getTime();
-	jobRun.status = exitCode === 0 ? "success" : "failed";
-	jobRun.exitCode = exitCode;
-	jobRun.finishedAt = finishedAt;
-	jobRun.durationMs = durationMs;
-}
-
-function finalizeCanceledJobRun(jobRun: JobRun): void {
-	const finishedAt = new Date().toISOString();
-	const durationMs =
-		new Date(finishedAt).getTime() - new Date(jobRun.startedAt ?? finishedAt).getTime();
-	jobRun.status = "canceled";
-	jobRun.exitCode = 130;
-	jobRun.finishedAt = finishedAt;
-	jobRun.durationMs = durationMs;
-}
-
-function finalizeRunRecord(run: RunRecord): void {
-	const finishedAt = new Date().toISOString();
-	const hasFailure = run.jobs.some((job) => job.status === "failed");
-	const hasCanceled = run.jobs.some((job) => job.status === "canceled");
-	const isRunning = run.jobs.some((job) => job.status === "running");
-	if (!isRunning) {
-		run.status = hasFailure ? "failed" : hasCanceled ? "canceled" : "success";
-		run.finishedAt = finishedAt;
+function markRemainingCanceled(plan: RunPlan, context: EngineContext, startIndex: number): void {
+	const jobIds = plan.jobs.slice(startIndex).map((job) => job.jobId);
+	if (jobIds.length === 0) {
+		return;
 	}
-}
-
-function markRemainingCanceled(run: RunRecord, startIndex: number): void {
-	for (let i = startIndex; i < run.jobs.length; i += 1) {
-		if (run.jobs[i].status === "pending") {
-			run.jobs[i].status = "canceled";
-		}
-	}
+	context.onEvent?.({
+		type: "jobs-canceled",
+		runId: plan.runId,
+		jobIds,
+	});
 }
 
 function runAct(

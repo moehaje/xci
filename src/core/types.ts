@@ -70,6 +70,7 @@ export type JobRun = {
 };
 
 export type RunRecord = {
+	schemaVersion: number;
 	id: string;
 	workflowId: string;
 	event: EventSpec;

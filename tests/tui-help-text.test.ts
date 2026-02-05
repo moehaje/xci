@@ -1,35 +1,36 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import { describe, expect, it } from "vitest";
 import { formatHelpText } from "../src/tui/run-view/utils/help.js";
 
-test("help text reflects summary mode controls", () => {
-	const text = formatHelpText({
-		viewMode: "summary",
-		focusedPane: "jobs",
-		quitPromptVisible: false,
-		statusText: "running",
+describe("tui help text", () => {
+	it("shows summary mode controls", () => {
+		const text = formatHelpText({
+			viewMode: "summary",
+			focusedPane: "jobs",
+			quitPromptVisible: false,
+			statusText: "running",
+		});
+		expect(text).toContain("D: details");
+		expect(text).toContain("Q: exit");
 	});
-	assert.match(text, /D: details/);
-	assert.match(text, /Q: exit/);
-});
 
-test("help text reflects details mode controls", () => {
-	const text = formatHelpText({
-		viewMode: "details",
-		focusedPane: "steps",
-		quitPromptVisible: false,
-		statusText: "running",
+	it("shows details mode controls", () => {
+		const text = formatHelpText({
+			viewMode: "details",
+			focusedPane: "steps",
+			quitPromptVisible: false,
+			statusText: "running",
+		});
+		expect(text).toContain("Space/Enter: toggle step");
+		expect(text).toContain("focus pane");
 	});
-	assert.match(text, /Space\/Enter: toggle step/);
-	assert.match(text, /focus pane/);
-});
 
-test("help text reflects quit confirmation controls", () => {
-	const text = formatHelpText({
-		viewMode: "details",
-		focusedPane: "steps",
-		quitPromptVisible: true,
-		statusText: "running",
+	it("shows quit confirmation controls", () => {
+		const text = formatHelpText({
+			viewMode: "details",
+			focusedPane: "steps",
+			quitPromptVisible: true,
+			statusText: "running",
+		});
+		expect(text).toBe("Y: confirm cancel · N/Enter/Esc: continue run");
 	});
-	assert.equal(text, "Y: confirm cancel · N/Enter/Esc: continue run");
 });
